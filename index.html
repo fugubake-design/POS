@@ -198,22 +198,82 @@ body[data-role="cashier"] .own{display:none!important}
 .chip[data-act=tog] .bp{font-size:16px}
 .gh b{font-size:19px}.gh .mut{font-size:15px}
 .ln .mut{font-size:16px;line-height:1.45;color:var(--ink)}
+
+/* ===== Login ===== */
+#login{display:none;position:fixed;inset:0;z-index:90;background:var(--bg);overflow-y:auto;place-items:center;padding:calc(20px + env(safe-area-inset-top,0px)) 20px calc(20px + env(safe-area-inset-bottom,0px))}
+body[data-auth="out"] #login{display:grid}
+body[data-auth="out"] .top,body[data-auth="out"] main,body[data-auth="out"] #alert{visibility:hidden}
+.lgbox{width:min(400px,100%);background:var(--sf);border:1px solid var(--line);border-radius:22px;padding:28px 22px;display:grid;gap:10px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.08)}
+.lgbox h1{margin:0;font-size:26px}
+.lglogo{font-size:56px;line-height:1.1}.lglogo img{max-height:84px;max-width:70%;object-fit:contain}
+.lgstaff,.lgowner{width:100%}.lgstaff{margin-top:6px}
+.lgowner{background:var(--ink);color:var(--bg)}
+.lgdiv{display:flex;align-items:center;gap:10px;color:var(--mute);font-size:14px;margin:6px 0}
+.lgdiv::before,.lgdiv::after{content:'';flex:1;height:1px;background:var(--line)}
+.lgbox .f{text-align:left;margin:0}.lgbox .f input{font-size:18px;padding:14px}
+.lgerr{min-height:20px;color:var(--bad);font-size:14px}
+.umrow{display:flex;gap:14px;align-items:center;margin:14px 0}.umi{font-size:36px}
+.umb{width:100%;margin-bottom:10px;text-align:left}
+/* ===== Switch ===== */
+.swrow{display:flex;align-items:center;justify-content:space-between;gap:14px;background:var(--sf);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:14px}
+.swrow small{display:block;color:var(--mute);font-size:13px;margin-top:3px;line-height:1.4}
+.sw{appearance:none;-webkit-appearance:none;flex:none;width:54px;height:32px;border-radius:99px;background:var(--line);position:relative;cursor:pointer;transition:background .2s}
+.sw::after{content:'';position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:left .2s}
+.sw:checked{background:var(--brand)}.sw:checked::after{left:25px}
+/* ===== Header: desktop ===== */
+.tools{display:flex;align-items:center;gap:8px;flex:none}
+.tabs{overflow:visible}
+.ti,.ts{display:none}
+.cart{top:calc(var(--hh,60px) + env(safe-area-inset-top,0px) + 12px);max-height:calc(100dvh - var(--hh,60px) - 28px - env(safe-area-inset-top,0px))}
+#toast{top:calc(var(--hh,60px) + env(safe-area-inset-top,0px) + 8px)}
+/* ===== Header: mobile / tablet (no horizontal scrolling) ===== */
+@media(max-width:1000px){
+ .top{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"brand tools" "tabs tabs";gap:6px 8px;padding:8px 10px}
+ .brand{display:block;grid-area:brand;margin:0;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .tools{grid-area:tools}
+ .tabs{grid-area:tabs;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:4px;padding:3px}
+ .tab{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:5px 2px;min-height:46px;font-size:11px;line-height:1.2;text-align:center}
+ .ti{display:block;font-size:18px}.tl{display:none}.ts{display:block}
+ body[data-role="cashier"] .tabs{display:none}
+ .setbtn,.rt{display:none}
+ .top .btn{min-height:42px}
+ #rolebtn{min-width:46px}
+}
+@media(min-width:1001px){.rc{display:none}}
+@media(max-width:900px){
+ .pos{padding-bottom:calc(92px + env(safe-area-inset-bottom,0px))}
+ .cart{top:auto;bottom:calc(8px + env(safe-area-inset-bottom,0px));max-height:calc(100dvh - var(--hh,100px) - 24px - env(safe-area-inset-bottom,0px) - env(safe-area-inset-top,0px))}
+}
 </style>
 </head>
 <body>
+<div id="login" role="dialog" aria-modal="true" aria-labelledby="lg-title">
+  <div class="lgbox">
+    <div class="lglogo" id="lg-logo">🧋</div>
+    <h1 id="lg-title">Tea Counter</h1>
+    <div class="mut">เลือกวิธีเข้าใช้งาน</div>
+    <button class="btn pri big lgstaff" data-act="loginstaff">👤 พนักงาน · เข้าใช้งานทันที</button>
+    <div class="lgdiv"><span>หรือ</span></div>
+    <div class="f"><label for="lg-pw">เจ้าของร้าน · รหัสผ่าน</label><input id="lg-pw" type="password" autocomplete="current-password" enterkeyhint="go" placeholder="กรอกรหัสผ่าน"></div>
+    <div class="lgerr" id="lg-err" role="alert"></div>
+    <button class="btn big lgowner" data-act="loginowner">👑 เข้าสู่ระบบเจ้าของร้าน</button>
+  </div>
+</div>
 <header class="top">
   <div class="brand" id="brand" data-act="settings" title="แตะเพื่อเปลี่ยนชื่อร้าน (เจ้าของ)">Tea Counter</div>
   <nav class="tabs">
-    <button class="tab" data-act="nav" data-v="pos">ขายหน้าร้าน</button>
-    <button class="tab own" data-act="nav" data-v="menu">จัดการเมนู</button>
-    <button class="tab own" data-act="nav" data-v="opt">ตัวเลือกเสริม</button>
-    <button class="tab own" data-act="nav" data-v="stock">สต็อก</button>
-    <button class="tab own" data-act="nav" data-v="rep">สรุปยอดขาย</button>
+    <button class="tab" data-act="nav" data-v="pos"><span class="ti">🛒</span><span class="tl">ขายหน้าร้าน</span><span class="ts">ขาย</span></button>
+    <button class="tab own" data-act="nav" data-v="menu"><span class="ti">📋</span><span class="tl">จัดการเมนู</span><span class="ts">เมนู</span></button>
+    <button class="tab own" data-act="nav" data-v="opt"><span class="ti">➕</span><span class="tl">ตัวเลือกเสริม</span><span class="ts">ตัวเลือก</span></button>
+    <button class="tab own" data-act="nav" data-v="stock"><span class="ti">📦</span><span class="tl">สต็อก</span><span class="ts">สต็อก</span></button>
+    <button class="tab own" data-act="nav" data-v="rep"><span class="ti">📊</span><span class="tl">สรุปยอดขาย</span><span class="ts">สรุป</span></button>
   </nav>
-  <span id="sync" class="syncb wait">⏳</span>
-  <button class="btn" id="shiftbtn" data-act="shiftbtn">เปิดกะ</button>
-  <button class="btn own" data-act="settings">ตั้งค่า</button>
-  <button class="btn" id="rolebtn" data-act="role">🔒 เจ้าของ</button>
+  <div class="tools">
+    <span id="sync" class="syncb wait">⏳</span>
+    <button class="btn" id="shiftbtn" data-act="shiftbtn">เปิดกะ</button>
+    <button class="btn own setbtn" data-act="settings">ตั้งค่า</button>
+    <button class="btn" id="rolebtn" data-act="usermenu" aria-haspopup="dialog" aria-label="เมนูผู้ใช้">👤</button>
+  </div>
 </header>
 <div id="alert"></div>
 <main id="app"></main>
@@ -247,8 +307,8 @@ let menu=store.get('pos.menu',null)||seed(), orders=store.get('pos.orders',[]);
 store.set('pos.menu',menu);
 let cart=[],cat='ทั้งหมด',view='pos',repDate=ymd(new Date()),cartOpen=false,ctx={},mr=null,askRes=null;
 const catList=()=>['ทั้งหมด',...new Set(menu.map(p=>p.cat))];
-let disc={t:'amt',v:0},note='',otype='',held=store.get('pos.held',[]),shift=store.get('pos.shift',null),shifts=store.get('pos.shifts',[]),ings=store.get('pos.ings',[]),role=(()=>{try{return sessionStorage.getItem('pos.role')==='owner'?'owner':'cashier'}catch(e){return 'cashier'}})();
-document.body.dataset.role=role;
+let disc={t:'amt',v:0},note='',otype='',held=store.get('pos.held',[]),shift=store.get('pos.shift',null),shifts=store.get('pos.shifts',[]),ings=store.get('pos.ings',[]),sess0=(()=>{try{const s=JSON.parse(localStorage.getItem('pos.session')||'null');return s&&(s.role==='owner'||s.role==='cashier')?s.role:null}catch(e){return null}})(),role=sess0||'cashier';
+document.body.dataset.role=role;document.body.dataset.auth=sess0?'in':'out';
 const resetBill=()=>{disc={t:'amt',v:0};note='';otype=''};
 const curOT=()=>{const L=shop.otypes||[],t=L.find(x=>x.id===otype)||L[0];return t?t.name:''};
 const cartSub=()=>cart.reduce((a,c)=>a+c.unit*c.qty,0);
@@ -257,7 +317,7 @@ const discAmt=()=>{const s=cartSub();return Math.min(s,disc.t==='pct'?Math.round
 const cartTotal=()=>cartSub()-discAmt();
 
 const PM={cash:'เงินสด',qr:'PromptPay',card:'บัตร'},tm=t=>new Date(t).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'}),idesc=i=>i.desc||(i.tops&&i.tops.length?[i.tops.join(', ')]:[]);
-let shop=Object.assign({name:'Tea Counter',foot:'ขอบคุณที่ใช้บริการ',paper:58,low:5,pin:'1234',logo:'',info:'',qr:'',pad:2,otypes:[{id:'dine',name:'ทานที่ร้าน'},{id:'take',name:'สั่งกลับบ้าน'},{id:'deliv',name:'เดลิเวอรี'}]},store.get('pos.shop',{}));
+let shop=Object.assign({name:'Tea Counter',foot:'ขอบคุณที่ใช้บริการ',paper:58,low:5,pin:'1234',logo:'',info:'',qr:'',pad:2,sp:true,otypes:[{id:'dine',name:'ทานที่ร้าน'},{id:'take',name:'สั่งกลับบ้าน'},{id:'deliv',name:'เดลิเวอรี'}]},store.get('pos.shop',{}));
 let DL=null;if(window.claude&&claude.use)claude.use('downloads').then(d=>DL=d).catch(()=>{});
 let groups=store.get('pos.groups',null);
 if(!groups){
@@ -274,7 +334,12 @@ if(!groups){
 }
 const gs=p=>(p.gids||[]).map(i=>groups.find(g=>g.id===i)).filter(Boolean);
 const pic=p=>p.img?`<img src="${p.img}" alt="">`:esc(p.emoji||'🍽️');
-function calc(p,sel){let xc=0,bp=0,mc=p.cost||0;const desc=[];gs(p).forEach(g=>{const s=sel[g.id]||[];if(!s.length)return;xc+=Math.max(0,s.length-(g.free||0))*(g.extra||0);s.forEach(o=>{mc+=(g.cost&&g.cost[o])||0;bp+=(g.price&&g.price[o])||0});desc.push(g.name+': '+s.join(', '))});return{xc,bp,desc,unit:(Number(p.price)||0)+bp+xc,cost:mc}}
+/* spOn(): setting 'คิดราคาพิเศษแยก'. ON  = option with its own price is charged its own price and is NOT counted in the free quota / over-quota fee.
+                                     OFF = own price ignored; option counts like any other (free quota, then over-quota fee). */
+const spOn=()=>shop.sp!==false;
+const isSp=(g,o)=>spOn()&&((g.price&&g.price[o])||0)>0;
+const regN=(g,s)=>s.filter(o=>!isSp(g,o)).length;
+function calc(p,sel){let xc=0,bp=0,mc=p.cost||0;const desc=[];gs(p).forEach(g=>{const s=sel[g.id]||[];if(!s.length)return;xc+=Math.max(0,regN(g,s)-(g.free||0))*(g.extra||0);s.forEach(o=>{mc+=(g.cost&&g.cost[o])||0;if(isSp(g,o))bp+=g.price[o]});desc.push(g.name+': '+s.join(', '))});return{xc,bp,desc,unit:(Number(p.price)||0)+bp+xc,cost:mc}}
 
 
 /* ---- Modal / toast ---- */
@@ -318,8 +383,8 @@ function addToCart(p,sel,qty=1){
 function prodView(){
   const p=ctx.p,c=calc(p,ctx.sel);
   return `<h3>${esc(p.name)}</h3><div class="mut">${fmt(p.price)}</div>`+gs(p).map(g=>{const s=ctx.sel[g.id]||[];
-    return `<div class="gh"><b>${esc(g.name)}</b> <span class="mut">${g.multi?(g.extra?`ฟรี ${g.free} อย่างแรก เกินอย่างละ ${fmt(g.extra)}`:'เลือกได้หลายอย่าง'):'เลือก 1 อย่าง'}</span><span class="cnt ${g.multi&&g.extra&&s.length>g.free?'over':''}">เลือกแล้ว ${s.length}${g.multi?' / ฟรี '+g.free:''}</span></div><div class="chips">${g.opts.map(t=>{const i=s.indexOf(t);
-      return `<button class="chip ${i>=0?'on':''}" data-act="tog" ${g.stock&&g.stock[t]<=0?'disabled':''} data-g="${g.id}" data-t="${esc(t)}">${esc(t)}${(g.price&&g.price[t])?`<span class="bp">(+${fmt(g.price[t])})</span>`:''}<small>${i>=0?(g.extra?(i>=g.free?'ค่าเกิน +'+fmt(g.extra):'โควตาฟรี'):'✓'):''}</small></button>`}).join('')}</div>`}).join('')
+    return `<div class="gh"><b>${esc(g.name)}</b> <span class="mut">${g.multi?(g.extra?`ฟรี ${g.free} อย่างแรก เกินอย่างละ ${fmt(g.extra)}`:'เลือกได้หลายอย่าง'):'เลือก 1 อย่าง'}</span><span class="cnt ${g.multi&&g.extra&&regN(g,s)>g.free?'over':''}">เลือกแล้ว ${s.length}${g.multi?' / ฟรี '+g.free:''}</span></div><div class="chips">${g.opts.map(t=>{const i=s.indexOf(t);
+      return `<button class="chip ${i>=0?'on':''}" data-act="tog" ${g.stock&&g.stock[t]<=0?'disabled':''} data-g="${g.id}" data-t="${esc(t)}">${esc(t)}${isSp(g,t)?`<span class="bp">(+${fmt(g.price[t])})</span>`:''}<small>${i>=0?(isSp(g,t)?'ราคาพิเศษ':(g.extra?(regN(g,s.slice(0,i))>=g.free?'ค่าเกิน +'+fmt(g.extra):'โควตาฟรี'):'✓')):''}</small></button>`}).join('')}</div>`}).join('')
   +brkHtml(p,c)
   +`<div class="foot"><div class="qty"><button data-act="mq" data-d="-1" aria-label="ลด">−</button><span>${ctx.qty}</span><button data-act="mq" data-d="1" aria-label="เพิ่ม">+</button></div><button class="btn pri big" data-act="addp">เพิ่มลงตะกร้า ${fmt(c.unit*ctx.qty)}</button></div>`;
 }
@@ -370,7 +435,7 @@ function repView(){
 
 /* ---- Events ---- */
 function optView(){
-  return `<div class="wrap"><div class="hd"><h2>กลุ่มตัวเลือกเสริม (${groups.length})</h2><div class="acts"><button class="btn" data-act="seedgroups">↺ เพิ่มตัวเลือกเริ่มต้น</button><button class="btn pri" data-act="gedit" data-id="">เพิ่มกลุ่มตัวเลือก</button></div></div>
+  return `<div class="wrap"><div class="hd"><h2>กลุ่มตัวเลือกเสริม (${groups.length})</h2><div class="acts"><button class="btn" data-act="seedgroups">↺ เพิ่มตัวเลือกเริ่มต้น</button><button class="btn pri" data-act="gedit" data-id="">เพิ่มกลุ่มตัวเลือก</button></div></div><label class="swrow"><span><b>คิดราคาพิเศษของท็อปปิ้งแยกต่างหาก</b><small>${spOn()?'เปิดอยู่: ท็อปปิ้งที่ตั้งราคาพิเศษ (เช่น นูเทล่า +฿10) คิดราคาของตัวมันเอง แยกจากโควตาฟรีและค่าส่วนเกิน':'ปิดอยู่: ไม่บวกราคาพิเศษ ทุกตัวนับตามลำดับและโควตาฟรีตามปกติ'}</small></span><input type="checkbox" class="sw" id="sp-sw" role="switch" aria-label="คิดราคาพิเศษของท็อปปิ้งแยกต่างหาก" ${spOn()?'checked':''}></label>
   <p class="mut">สร้างกลุ่มไว้ครั้งเดียวแล้วเลือกใช้กับหลายเมนูได้ เพิ่มตัวเลือกใหม่ภายหลังเมื่อไรก็ได้ และจะอัปเดตทุกเมนูที่ใช้กลุ่มนี้</p>
   ${groups.map(g=>`<div class="row" style="grid-template-columns:1fr auto"><div><b>${esc(g.name)}</b> <span class="mut">${g.multi?'เลือกได้หลายอย่าง':'เลือก 1 อย่าง'}, ฟรี ${g.free}, เกินอย่างละ ${fmt(g.extra)}</span><div>${esc(g.opts.map(o=>o+((g.price&&g.price[o])?' (+'+g.price[o]+')':'')).join(', '))}</div><div class="mut">ใช้กับ ${menu.filter(p=>(p.gids||[]).includes(g.id)).length} เมนู</div></div><div class="acts"><button class="btn" data-act="gedit" data-id="${g.id}">แก้ไข</button><button class="btn bad" data-act="gdel" data-id="${g.id}">ลบ</button></div></div>`).join('')||'<div class="empty">ยังไม่มีกลุ่มตัวเลือก</div>'}</div>`;
 }
@@ -473,8 +538,8 @@ async function csv(all){
   catch(e){if(!e||e.code!=='declined')toast('บันทึกไฟล์ไม่สำเร็จ')}
 }
 const OWN=new Set(['edit','save','del','rmimg','gedit','gsave','gdel','settings','saveshop','csv','wipe','odel']);
-function setRole(r){role=r;try{sessionStorage.setItem('pos.role',r)}catch(e){}document.body.dataset.role=r;$('#rolebtn').textContent=r==='owner'?'เจ้าของ ✓ ออก':'🔒 เจ้าของ';if(r!=='owner')view='pos';render()}
-function refreshShift(){$('#brand').textContent=shop.name;document.title=shop.name+' POS';$('#rolebtn').textContent=role==='owner'?'เจ้าของ ✓ ออก':'🔒 เจ้าของ';$('#shiftbtn').textContent=shift?'ปิดกะ':'เปิดกะ'}
+function setRole(r){role=r;document.body.dataset.role=r;if(r!=='owner')view='pos';render()}
+function refreshShift(){$('#brand').textContent=shop.name;document.title=shop.name+' POS';$('#rolebtn').innerHTML=(role==='owner'?'👑':'👤')+'<span class="rt"> '+(role==='owner'?'เจ้าของ':'พนักงาน')+'</span> <span class="rc">☰</span>';$('#lg-title').textContent=shop.name;$('#shiftbtn').textContent=shift?'ปิดกะ':'เปิดกะ'}
 function renderAlert(){
   const L=[];menu.forEach(p=>{if(p.stock!=null&&p.stock<=shop.low)L.push(p.name+' เหลือ '+p.stock)});
   groups.forEach(g=>Object.entries(g.stock||{}).forEach(([o,v])=>{if(g.opts.includes(o)&&v<=shop.low)L.push(o+' เหลือ '+v)}));
@@ -661,7 +726,7 @@ function gprev(){
   if($('#g-multi').value!=='1'){el.innerHTML='ลูกค้าเลือกได้ 1 อย่าง'+(x&&f<1?' และคิดเพิ่ม '+fmt(x):' ไม่คิดเพิ่ม');return}
   const top=Math.max(1,Math.min(n||f+2,f+3)),r=[];
   for(let k=1;k<=top;k++)r.push(`<span class="pv ${k>f&&x?'pay':''}">เลือก ${k} อย่าง <b>${k>f?'+'+fmt((k-f)*x):'ฟรี'}</b></span>`);
-  el.innerHTML='ตัวอย่างค่าเกินฟรี (ยังไม่รวมราคาพื้นฐานของแต่ละตัวเลือก)<div class="pvs">'+r.join('')+'</div>';
+  el.innerHTML='ตัวอย่างค่าเกินฟรี'+(spOn()?' (ตัวเลือกที่ตั้งราคาพิเศษ คิดแยก ไม่นับโควตา)':' (สวิตช์ราคาพิเศษปิดอยู่ จึงไม่คิดราคาพิเศษ)')+'<div class="pvs">'+r.join('')+'</div>';
 }
 A.gstep=d=>{const e=$('#'+d.f);e.value=Math.max(0,(parseFloat(e.value)||0)+Number(d.d)*Number(d.s));gprev()};
 {const og=A.gedit;A.gedit=d=>{og(d);gprev()}}
@@ -729,9 +794,9 @@ function optLine(g,o){const r=(g.recipe&&g.recipe[o])||[],p=[o,(g.price&&g.price
 function brkHtml(p,c){
   let bl='',xl='';
   gs(p).forEach(g=>{const s=ctx.sel[g.id]||[];
-    s.forEach(o=>{const b=(g.price&&g.price[o])||0;if(b)bl+=`<div class="s"><span>${esc(o)}</span><span>+${fmt(b)}</span></div>`});
-    const ov=Math.max(0,s.length-g.free);if(ov&&g.extra)xl+=`<div class="s"><span>${esc(g.name)} เกินฟรี ${ov} อย่าง × ${fmt(g.extra)}</span><span>+${fmt(ov*g.extra)}</span></div>`});
-  return `<div class="brk"><div><span>ราคาเมนู</span><span>${fmt(p.price)}</span></div>${c.bp?`<div class="x"><span>ราคาตัวเลือกเสริมพื้นฐาน</span><span>+${fmt(c.bp)}</span></div>${bl}`:''}${c.xc?`<div class="x"><span>ค่าตัวเลือกเสริมที่เลือกเกินฟรี</span><span>+${fmt(c.xc)}</span></div>${xl}`:''}<div class="t"><span>ราคาสุทธิต่อแก้ว/จาน</span><span>${fmt(c.unit)}</span></div></div>`;
+    s.forEach(o=>{const b=isSp(g,o)?g.price[o]:0;if(b)bl+=`<div class="s"><span>${esc(o)}</span><span>+${fmt(b)}</span></div>`});
+    const ov=Math.max(0,regN(g,s)-g.free);if(ov&&g.extra)xl+=`<div class="s"><span>${esc(g.name)} เกินฟรี ${ov} อย่าง × ${fmt(g.extra)}</span><span>+${fmt(ov*g.extra)}</span></div>`});
+  return `<div class="brk"><div><span>ราคาเมนู</span><span>${fmt(p.price)}</span></div>${c.bp?`<div class="x"><span>ราคาพิเศษของตัวเลือก (คิดแยก)</span><span>+${fmt(c.bp)}</span></div>${bl}`:''}${c.xc?`<div class="x"><span>ค่าตัวเลือกเสริมที่เลือกเกินฟรี</span><span>+${fmt(c.xc)}</span></div>${xl}`:''}<div class="t"><span>ราคาสุทธิต่อแก้ว/จาน</span><span>${fmt(c.unit)}</span></div></div>`;
 }
 Object.assign(A,{
   gsave(){
@@ -769,6 +834,40 @@ Object.assign(A,{
 });
 
 let query='';
+/* ================= Login / session (localStorage 'pos.session') ================= */
+const writeSess=r=>{try{localStorage.setItem('pos.session',JSON.stringify({role:r,ts:Date.now()}))}catch(e){}};
+function showLogin(){
+  $('#lg-title').textContent=shop.name;$('#lg-logo').innerHTML=shop.logo?`<img src="${shop.logo}" alt="">`:'🧋';
+  $('#lg-pw').value='';$('#lg-err').textContent='';
+}
+function doLogin(r){writeSess(r);document.body.dataset.auth='in';view='pos';setRole(r);toast('เข้าสู่ระบบ: '+(r==='owner'?'เจ้าของร้าน':'พนักงาน'))}
+function doLogout(){
+  try{localStorage.removeItem('pos.session')}catch(e){}
+  close();role='cashier';document.body.dataset.role='cashier';document.body.dataset.auth='out';view='pos';render();showLogin();scrollTo(0,0);
+}
+let lgFail=0,lgLock=0;
+Object.assign(A,{
+  loginstaff(){doLogin('cashier')},
+  loginowner(){
+    const inp=$('#lg-pw'),err=$('#lg-err'),now=Date.now();
+    if(now<lgLock){err.textContent='ลองใหม่อีกครั้งใน '+Math.ceil((lgLock-now)/1000)+' วินาที';return}
+    if(inp.value&&inp.value===String(shop.pin)){lgFail=0;doLogin('owner');inp.value='';err.textContent=''}
+    else{lgFail++;inp.value='';if(lgFail>=5){lgLock=now+30000;lgFail=0;err.textContent='ใส่รหัสผิดหลายครั้ง กรุณารอ 30 วินาที'}else err.textContent='รหัสผ่านไม่ถูกต้อง';inp.focus()}
+  },
+  usermenu(){modal(()=>`<h3>บัญชีผู้ใช้</h3><div class="umrow"><span class="umi">${role==='owner'?'👑':'👤'}</span><div><b>${role==='owner'?'เจ้าของร้าน':'พนักงาน'}</b><div class="mut">${esc(shop.name)}</div></div></div>${role==='owner'?'<button class="btn big umb" data-act="settings">⚙ ตั้งค่าร้านและใบเสร็จ</button>':''}<button class="btn big umb" data-act="logout">⎋ ออกจากระบบ</button><div class="foot"><button class="btn" data-act="close">ปิด</button></div>`)},
+  logout(){doLogout()}
+});
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='lg-pw'){e.preventDefault();A.loginowner()}});
+/* ---- special-price switch ---- */
+document.addEventListener('change',e=>{
+  if(e.target.id!=='sp-sw')return;
+  if(role!=='owner'){e.target.checked=spOn();return toast('ต้องเข้าสู่ระบบเจ้าของร้านก่อน')}
+  shop.sp=e.target.checked;store.set('pos.shop',shop);
+  cart.forEach(c=>{const p=menu.find(x=>x.id===c.pid);if(p){const k=calc(p,c.sel);c.unit=k.unit;c.xc=k.xc;c.bp=k.bp;c.desc=k.desc}});
+  render();toast(shop.sp?'เปิดการคิดราคาพิเศษแยกแล้ว':'ปิดการคิดราคาพิเศษแล้ว');
+});
+/* ---- header height -> CSS var (keeps cart / toast clear of the top bar) ---- */
+{const h=$('.top'),sh=()=>document.documentElement.style.setProperty('--hh',h.offsetHeight+'px');sh();addEventListener('resize',sh);if(window.ResizeObserver)new ResizeObserver(sh).observe(h)}
 /* ---- Restore default modifier groups (writes to local + Firestore via store.set) ---- */
 const SEED_GROUPS=()=>[
   {name:'ท็อปปิ้ง (โมจิครีมชีส)',match:/โมจิ/,multi:true,free:2,extra:0,opts:['ออริจินัล','สตอเบอรี่'],price:{}},
@@ -899,7 +998,7 @@ async function push(col,arr){
 }
 function pushShop(v){
   if(!FB.ok||!FB.ready.shop)return;
-  FB.db.collection('settings').doc('shop').set({name:v.name||'',foot:v.foot||'',paper:Number(v.paper)||58,low:Number(v.low)||0,otypes:(v.otypes||[]).map(x=>({id:x.id,name:x.name})),logo:v.logo||'',info:v.info||'',qr:v.qr||'',pad:v.pad==null||isNaN(v.pad)?2:Number(v.pad)}).catch(fail);
+  FB.db.collection('settings').doc('shop').set({name:v.name||'',foot:v.foot||'',paper:Number(v.paper)||58,low:Number(v.low)||0,sp:v.sp!==false,otypes:(v.otypes||[]).map(x=>({id:x.id,name:x.name})),logo:v.logo||'',info:v.info||'',qr:v.qr||'',pad:v.pad==null||isNaN(v.pad)?2:Number(v.pad)}).catch(fail);
 }
 function refreshUI(){
   const a=document.activeElement;
@@ -940,6 +1039,7 @@ async function startSync(){
     addEventListener('online',()=>setSync(FB.live?'ok':'connecting'));
   }catch(e){FB.ok=false;setSync('local');console.warn('Firebase disabled, using LocalStorage only:',e)}
 }
+if(!sess0)showLogin();
 render();
 startSync();
 </script>
