@@ -244,6 +244,8 @@ body[data-auth="out"] .top,body[data-auth="out"] main,body[data-auth="out"] #ale
  .pos{padding-bottom:calc(92px + env(safe-area-inset-bottom,0px))}
  .cart{top:auto;bottom:calc(8px + env(safe-area-inset-bottom,0px));max-height:calc(100dvh - var(--hh,100px) - 24px - env(safe-area-inset-bottom,0px) - env(safe-area-inset-top,0px))}
 }
+.orow .spt{grid-column:1/-1;display:flex;align-items:center;gap:10px;font-size:13px;line-height:1.35;padding-top:6px;border-top:1px dashed var(--line);cursor:pointer}
+.sw-s{width:44px;height:26px}.sw-s::after{width:20px;height:20px}.sw-s:checked::after{left:21px}
 </style>
 </head>
 <body>
@@ -317,7 +319,7 @@ const discAmt=()=>{const s=cartSub();return Math.min(s,disc.t==='pct'?Math.round
 const cartTotal=()=>cartSub()-discAmt();
 
 const PM={cash:'เงินสด',qr:'PromptPay',card:'บัตร'},tm=t=>new Date(t).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'}),idesc=i=>i.desc||(i.tops&&i.tops.length?[i.tops.join(', ')]:[]);
-let shop=Object.assign({name:'Tea Counter',foot:'ขอบคุณที่ใช้บริการ',paper:58,low:5,pin:'1234',logo:'',info:'',qr:'',pad:2,sp:true,otypes:[{id:'dine',name:'ทานที่ร้าน'},{id:'take',name:'สั่งกลับบ้าน'},{id:'deliv',name:'เดลิเวอรี'}]},store.get('pos.shop',{}));
+let shop=Object.assign({name:'Tea Counter',foot:'ขอบคุณที่ใช้บริการ',paper:58,low:5,pin:'1234',logo:'',info:'',qr:'',pad:2,otypes:[{id:'dine',name:'ทานที่ร้าน'},{id:'take',name:'สั่งกลับบ้าน'},{id:'deliv',name:'เดลิเวอรี'}]},store.get('pos.shop',{}));
 let DL=null;if(window.claude&&claude.use)claude.use('downloads').then(d=>DL=d).catch(()=>{});
 let groups=store.get('pos.groups',null);
 if(!groups){
@@ -336,8 +338,10 @@ const gs=p=>(p.gids||[]).map(i=>groups.find(g=>g.id===i)).filter(Boolean);
 const pic=p=>p.img?`<img src="${p.img}" alt="">`:esc(p.emoji||'🍽️');
 /* spOn(): setting 'คิดราคาพิเศษแยก'. ON  = option with its own price is charged its own price and is NOT counted in the free quota / over-quota fee.
                                      OFF = own price ignored; option counts like any other (free quota, then over-quota fee). */
-const spOn=()=>shop.sp!==false;
-const isSp=(g,o)=>spOn()&&((g.price&&g.price[o])||0)>0;
+/* Per-option switch: g.sp[option]===false means OFF. Absent/true = ON (needs a price > 0).
+   ON  -> charged its own price once; NOT counted in the free quota and never in the over-quota fee, whatever its order.
+   OFF -> own price ignored; counted like any normal option (free X first, then extra per item). */
+const isSp=(g,o)=>((g.price&&g.price[o])||0)>0&&!(g.sp&&g.sp[o]===false);
 const regN=(g,s)=>s.filter(o=>!isSp(g,o)).length;
 function calc(p,sel){let xc=0,bp=0,mc=p.cost||0;const desc=[];gs(p).forEach(g=>{const s=sel[g.id]||[];if(!s.length)return;xc+=Math.max(0,regN(g,s)-(g.free||0))*(g.extra||0);s.forEach(o=>{mc+=(g.cost&&g.cost[o])||0;if(isSp(g,o))bp+=g.price[o]});desc.push(g.name+': '+s.join(', '))});return{xc,bp,desc,unit:(Number(p.price)||0)+bp+xc,cost:mc}}
 
@@ -435,9 +439,9 @@ function repView(){
 
 /* ---- Events ---- */
 function optView(){
-  return `<div class="wrap"><div class="hd"><h2>กลุ่มตัวเลือกเสริม (${groups.length})</h2><div class="acts"><button class="btn" data-act="seedgroups">↺ เพิ่มตัวเลือกเริ่มต้น</button><button class="btn pri" data-act="gedit" data-id="">เพิ่มกลุ่มตัวเลือก</button></div></div><label class="swrow"><span><b>คิดราคาพิเศษของท็อปปิ้งแยกต่างหาก</b><small>${spOn()?'เปิดอยู่: ท็อปปิ้งที่ตั้งราคาพิเศษ (เช่น นูเทล่า +฿10) คิดราคาของตัวมันเอง แยกจากโควตาฟรีและค่าส่วนเกิน':'ปิดอยู่: ไม่บวกราคาพิเศษ ทุกตัวนับตามลำดับและโควตาฟรีตามปกติ'}</small></span><input type="checkbox" class="sw" id="sp-sw" role="switch" aria-label="คิดราคาพิเศษของท็อปปิ้งแยกต่างหาก" ${spOn()?'checked':''}></label>
+  return `<div class="wrap"><div class="hd"><h2>กลุ่มตัวเลือกเสริม (${groups.length})</h2><div class="acts"><button class="btn" data-act="seedgroups">↺ เพิ่มตัวเลือกเริ่มต้น</button><button class="btn pri" data-act="gedit" data-id="">เพิ่มกลุ่มตัวเลือก</button></div></div>
   <p class="mut">สร้างกลุ่มไว้ครั้งเดียวแล้วเลือกใช้กับหลายเมนูได้ เพิ่มตัวเลือกใหม่ภายหลังเมื่อไรก็ได้ และจะอัปเดตทุกเมนูที่ใช้กลุ่มนี้</p>
-  ${groups.map(g=>`<div class="row" style="grid-template-columns:1fr auto"><div><b>${esc(g.name)}</b> <span class="mut">${g.multi?'เลือกได้หลายอย่าง':'เลือก 1 อย่าง'}, ฟรี ${g.free}, เกินอย่างละ ${fmt(g.extra)}</span><div>${esc(g.opts.map(o=>o+((g.price&&g.price[o])?' (+'+g.price[o]+')':'')).join(', '))}</div><div class="mut">ใช้กับ ${menu.filter(p=>(p.gids||[]).includes(g.id)).length} เมนู</div></div><div class="acts"><button class="btn" data-act="gedit" data-id="${g.id}">แก้ไข</button><button class="btn bad" data-act="gdel" data-id="${g.id}">ลบ</button></div></div>`).join('')||'<div class="empty">ยังไม่มีกลุ่มตัวเลือก</div>'}</div>`;
+  ${groups.map(g=>`<div class="row" style="grid-template-columns:1fr auto"><div><b>${esc(g.name)}</b> <span class="mut">${g.multi?'เลือกได้หลายอย่าง':'เลือก 1 อย่าง'}, ฟรี ${g.free}, เกินอย่างละ ${fmt(g.extra)}</span><div>${esc(g.opts.map(o=>o+(isSp(g,o)?' (+'+g.price[o]+' ราคาพิเศษ)':'')).join(', '))}</div><div class="mut">ใช้กับ ${menu.filter(p=>(p.gids||[]).includes(g.id)).length} เมนู</div></div><div class="acts"><button class="btn" data-act="gedit" data-id="${g.id}">แก้ไข</button><button class="btn bad" data-act="gdel" data-id="${g.id}">ลบ</button></div></div>`).join('')||'<div class="empty">ยังไม่มีกลุ่มตัวเลือก</div>'}</div>`;
 }
 function gformView(){
   const g=ctx.g;
@@ -445,7 +449,7 @@ function gformView(){
   <div class="f"><label for="g-name">ชื่อกลุ่ม (เช่น ท็อปปิ้ง, ระดับความหวาน, ขนาดแก้ว)</label><input id="g-name" value="${esc(g.name)}"></div>
   <div class="f"><label for="g-multi">รูปแบบการเลือก</label><select id="g-multi"><option value="1" ${g.multi?'selected':''}>เลือกได้หลายอย่าง</option><option value="0" ${g.multi?'':'selected'}>เลือกได้ 1 อย่าง</option></select></div>
   <div class="pricing"><div class="pf"><label for="g-free">ฟรี(กี่)อย่างแรก</label><div class="step"><button type="button" data-act="gstep" data-f="g-free" data-s="1" data-d="-1" aria-label="ลด">−</button><input id="g-free" type="number" inputmode="numeric" min="0" value="${g.free}"><button type="button" data-act="gstep" data-f="g-free" data-s="1" data-d="1" aria-label="เพิ่ม">+</button></div><small>เช่น 2 = เลือก 2 อย่างแรกไม่คิดเงิน</small></div><div class="pf"><label for="g-extra">เกินจำนวนฟรี คิดอย่างละ (บาท)</label><div class="step"><button type="button" data-act="gstep" data-f="g-extra" data-s="5" data-d="-1" aria-label="ลด">−</button><input id="g-extra" type="number" inputmode="decimal" min="0" value="${g.extra}"><button type="button" data-act="gstep" data-f="g-extra" data-s="5" data-d="1" aria-label="เพิ่ม">+</button></div><small>บวกเพิ่มต่อชิ้นที่เลือกเกินจำนวนฟรี</small></div><div id="g-prev" class="gprev"></div></div>
-  <div class="f"><label>ตัวเลือกในกลุ่ม</label><div id="g-rows">${(g.opts.length?g.opts:['']).map(o=>orow(o,(g.price&&g.price[o])||'',(g.cost&&g.cost[o])||'',recStr(g,o))).join('')}</div><button type="button" class="btn" data-act="gadd" style="width:100%">+ เพิ่มตัวเลือก</button></div>
+  <div class="f"><label>ตัวเลือกในกลุ่ม</label><div id="g-rows">${(g.opts.length?g.opts:['']).map(o=>orow(o,(g.price&&g.price[o])||'',(g.cost&&g.cost[o])||'',recStr(g,o),!(g.sp&&g.sp[o]===false))).join('')}</div><button type="button" class="btn" data-act="gadd" style="width:100%">+ เพิ่มตัวเลือก</button></div>
   <div class="foot"><button class="btn" data-act="close">ยกเลิก</button><button class="btn pri big" data-act="gsave">บันทึกกลุ่ม</button></div>`;
 }
 const readImg=f=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{const s=Math.min(1,360/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.round(im.width*s);c.height=Math.round(im.height*s);c.getContext('2d').drawImage(im,0,0,c.width,c.height);res(c.toDataURL('image/jpeg',.8))};im.onerror=rej;im.src=r.result};r.onerror=rej;r.readAsDataURL(f)});
@@ -726,7 +730,7 @@ function gprev(){
   if($('#g-multi').value!=='1'){el.innerHTML='ลูกค้าเลือกได้ 1 อย่าง'+(x&&f<1?' และคิดเพิ่ม '+fmt(x):' ไม่คิดเพิ่ม');return}
   const top=Math.max(1,Math.min(n||f+2,f+3)),r=[];
   for(let k=1;k<=top;k++)r.push(`<span class="pv ${k>f&&x?'pay':''}">เลือก ${k} อย่าง <b>${k>f?'+'+fmt((k-f)*x):'ฟรี'}</b></span>`);
-  el.innerHTML='ตัวอย่างค่าเกินฟรี'+(spOn()?' (ตัวเลือกที่ตั้งราคาพิเศษ คิดแยก ไม่นับโควตา)':' (สวิตช์ราคาพิเศษปิดอยู่ จึงไม่คิดราคาพิเศษ)')+'<div class="pvs">'+r.join('')+'</div>';
+  el.innerHTML='ตัวอย่างค่าเกินฟรี (ตัวเลือกที่เปิดสวิตช์ราคาพิเศษ คิดราคาของมันเอง ไม่นับโควตา)<div class="pvs">'+r.join('')+'</div>';
 }
 A.gstep=d=>{const e=$('#'+d.f);e.value=Math.max(0,(parseFloat(e.value)||0)+Number(d.d)*Number(d.s));gprev()};
 {const og=A.gedit;A.gedit=d=>{og(d);gprev()}}
@@ -810,24 +814,24 @@ Object.assign(A,{
 });
 
 const recStr=(g,o)=>((g.recipe&&g.recipe[o])||[]).map(x=>{const q=ings.find(i=>i.id===x.id);return q?q.name+':'+x.amt:''}).filter(Boolean).join(',');
-function orow(n='',b='',c='',r=''){
+function orow(n='',b='',c='',r='',sp=true){
   const v=x=>x===''||!+x?'':x;
-  return `<div class="orow"><label class="oc on"><span>ชื่อตัวเลือก *</span><input class="o-n" value="${esc(n)}" placeholder="เช่น โอวัลตินเฟลก"></label><label class="oc"><span>ราคาพื้นฐาน ฿</span><input class="o-b" type="number" inputmode="decimal" min="0" step="any" placeholder="0" value="${v(b)}"></label><label class="oc"><span>ต้นทุน ฿</span><input class="o-c" type="number" inputmode="decimal" min="0" step="any" placeholder="0" value="${v(c)}"></label><label class="oc"><span>สูตร</span><input class="o-r" value="${esc(r)}" placeholder="โอวัลติน:10"></label><button type="button" class="ox" data-act="gdelrow" aria-label="ลบตัวเลือก">ลบ ✕</button></div>`;
+  return `<div class="orow"><label class="oc on"><span>ชื่อตัวเลือก *</span><input class="o-n" value="${esc(n)}" placeholder="เช่น โอวัลตินเฟลก"></label><label class="oc"><span>ราคาพื้นฐาน ฿</span><input class="o-b" type="number" inputmode="decimal" min="0" step="any" placeholder="0" value="${v(b)}"></label><label class="oc"><span>ต้นทุน ฿</span><input class="o-c" type="number" inputmode="decimal" min="0" step="any" placeholder="0" value="${v(c)}"></label><label class="oc"><span>สูตร</span><input class="o-r" value="${esc(r)}" placeholder="โอวัลติน:10"></label><button type="button" class="ox" data-act="gdelrow" aria-label="ลบตัวเลือก">ลบ ✕</button><label class="spt"><input type="checkbox" class="sw sw-s o-sp" role="switch" ${sp?'checked':''}><span><b>เปิดใช้งานราคาพิเศษ</b> (คิดราคาพื้นฐานเดี่ยว ๆ ไม่รวมโควตา)</span></label></div>`;
 }
 Object.assign(A,{
   gadd(){$('#g-rows').insertAdjacentHTML('beforeend',orow());const r=document.querySelectorAll('#g-rows .o-n');r[r.length-1].focus();gprev()},
   gsave(){
-    const name=$('#g-name').value.trim(),opts=[],cost={},price={},recipe={};let bad=false;
+    const name=$('#g-name').value.trim(),opts=[],cost={},price={},recipe={},sp={};let bad=false;
     document.querySelectorAll('#g-rows .orow').forEach(r=>{
       const n=r.querySelector('.o-n').value.trim(),b=parseFloat(r.querySelector('.o-b').value),c=parseFloat(r.querySelector('.o-c').value),rs=r.querySelector('.o-r').value.trim();
       if(!n){if(b>0||c>0||rs)bad=true;return}
-      if(opts.includes(n))return;opts.push(n);if(b>0)price[n]=b;if(c>0)cost[n]=c;
+      if(opts.includes(n))return;opts.push(n);if(b>0)price[n]=b;{const t=r.querySelector('.o-sp');if(t&&!t.checked)sp[n]=false}if(c>0)cost[n]=c;
       const rr=[];rs.split(',').forEach(x=>{const [a,q]=x.split(':'),m=parseFloat(q);if(a&&a.trim()&&m>0)rr.push({id:ingId(a),amt:m})});if(rr.length)recipe[n]=rr;
     });
     if(!name)return toast('กรอกชื่อกลุ่ม');
     if(bad)return toast('มีแถวที่กรอกข้อมูลแต่ยังไม่ใส่ชื่อตัวเลือก');
     if(!opts.length)return toast('เพิ่มตัวเลือกอย่างน้อย 1 อย่าง');
-    const o={id:ctx.id||uid(),name,multi:$('#g-multi').value==='1',free:Math.max(0,parseInt($('#g-free').value)||0),extra:Math.max(0,parseFloat($('#g-extra').value)||0),opts,price,cost,recipe,stock:ctx.g.stock||{}};
+    const o={id:ctx.id||uid(),name,multi:$('#g-multi').value==='1',free:Math.max(0,parseInt($('#g-free').value)||0),extra:Math.max(0,parseFloat($('#g-extra').value)||0),opts,price,cost,recipe,sp,stock:ctx.g.stock||{}};
     const i=groups.findIndex(x=>x.id===o.id);i<0?groups.push(o):groups[i]=o;
     store.set('pos.groups',groups);store.set('pos.ings',ings);close();render();toast('บันทึกกลุ่มตัวเลือกแล้ว');
   }
@@ -858,14 +862,6 @@ Object.assign(A,{
   logout(){doLogout()}
 });
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='lg-pw'){e.preventDefault();A.loginowner()}});
-/* ---- special-price switch ---- */
-document.addEventListener('change',e=>{
-  if(e.target.id!=='sp-sw')return;
-  if(role!=='owner'){e.target.checked=spOn();return toast('ต้องเข้าสู่ระบบเจ้าของร้านก่อน')}
-  shop.sp=e.target.checked;store.set('pos.shop',shop);
-  cart.forEach(c=>{const p=menu.find(x=>x.id===c.pid);if(p){const k=calc(p,c.sel);c.unit=k.unit;c.xc=k.xc;c.bp=k.bp;c.desc=k.desc}});
-  render();toast(shop.sp?'เปิดการคิดราคาพิเศษแยกแล้ว':'ปิดการคิดราคาพิเศษแล้ว');
-});
 /* ---- header height -> CSS var (keeps cart / toast clear of the top bar) ---- */
 {const h=$('.top'),sh=()=>document.documentElement.style.setProperty('--hh',h.offsetHeight+'px');sh();addEventListener('resize',sh);if(window.ResizeObserver)new ResizeObserver(sh).observe(h)}
 /* ---- Restore default modifier groups (writes to local + Firestore via store.set) ---- */
@@ -998,7 +994,7 @@ async function push(col,arr){
 }
 function pushShop(v){
   if(!FB.ok||!FB.ready.shop)return;
-  FB.db.collection('settings').doc('shop').set({name:v.name||'',foot:v.foot||'',paper:Number(v.paper)||58,low:Number(v.low)||0,sp:v.sp!==false,otypes:(v.otypes||[]).map(x=>({id:x.id,name:x.name})),logo:v.logo||'',info:v.info||'',qr:v.qr||'',pad:v.pad==null||isNaN(v.pad)?2:Number(v.pad)}).catch(fail);
+  FB.db.collection('settings').doc('shop').set({name:v.name||'',foot:v.foot||'',paper:Number(v.paper)||58,low:Number(v.low)||0,otypes:(v.otypes||[]).map(x=>({id:x.id,name:x.name})),logo:v.logo||'',info:v.info||'',qr:v.qr||'',pad:v.pad==null||isNaN(v.pad)?2:Number(v.pad)}).catch(fail);
 }
 function refreshUI(){
   const a=document.activeElement;
