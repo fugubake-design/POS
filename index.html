@@ -409,7 +409,7 @@ function paint(){if(mr){$('#modal .sheet').innerHTML=mr();if(mr===checkoutView)u
 function modal(fn){mr=fn;paint();$('#modal').classList.add('on')}
 function close(){mr=null;if(askRes){askRes(false);askRes=null}$('#modal').classList.remove('on')}
 const ask=(msg,ok='ยืนยัน')=>new Promise(r=>{askRes=r;modal(()=>`<h3>${esc(msg)}</h3><div class="foot"><button class="btn" data-act="close">ยกเลิก</button><button class="btn pri" data-act="askyes">${ok}</button></div>`)});
-let tt;function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('on'),2200)}
+let tt;function toast(m,ms){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('on'),ms||2200)}
 
 /* ---- POS view ---- */
 function render(){renderAlert();refreshShift();
@@ -570,17 +570,94 @@ async function rcptCanvas(o){
     if(p.c){x.textAlign='center';x.fillText(p.t,W/2,p.y)}else{x.textAlign='left';x.fillText(p.t,P,p.y);if(p.rt){x.textAlign='right';x.fillText(p.rt,W-P,p.y)}}});
   return cv;
 }
-let pr=null;
-const SV=['000018f0-0000-1000-8000-00805f9b34fb','0000ff00-0000-1000-8000-00805f9b34fb','0000ffe0-0000-1000-8000-00805f9b34fb','0000fff0-0000-1000-8000-00805f9b34fb','49535343-fe7d-4ae5-8fa9-9fafd205e455','e7810a71-73ae-499d-8c15-faa9aef0c3f2'];
-async function btConnect(){
-  if(!navigator.bluetooth)throw new Error('เบราว์เซอร์นี้ไม่รองรับบลูทูธ ใช้ Chrome/Edge หรือแอป Bluefy บน iPad');
-  if(pr&&pr.ch&&pr.dev.gatt.connected)return;
-  if(!pr)pr={dev:await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:SV})};
-  const srv=await pr.dev.gatt.connect();
-  for(const s of await srv.getPrimaryServices())for(const c of await s.getCharacteristics())if(c.properties.write||c.properties.writeWithoutResponse){pr.ch=c;return}
-  throw new Error('ไม่พบช่องส่งข้อมูลของเครื่องพิมพ์');
+/* ================= Bluetooth printing (ESC/POS raster, receipt looks the same as before) =================
+   โหมด BLE  = Web Bluetooth (Chrome/Edge บน Android/คอมพิวเตอร์, iOS ใช้แอป Bluefy)
+   โหมด RawBT = ส่งผ่านแอป RawBT (Android) สำหรับเครื่องพิมพ์บลูทูธแบบ Classic ที่ Web Bluetooth มองไม่เห็น
+   ค่าเหล่านี้ตั้งเฉพาะเครื่องนี้ (localStorage) เพราะเครื่องพิมพ์ผูกกับอุปกรณ์ที่ใช้งาน */
+let pr=null,btBusy=false;
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const SV=['000018f0-0000-1000-8000-00805f9b34fb','0000ff00-0000-1000-8000-00805f9b34fb','0000ffe0-0000-1000-8000-00805f9b34fb','0000fff0-0000-1000-8000-00805f9b34fb','49535343-fe7d-4ae5-8fa9-9fafd205e455','e7810a71-73ae-499d-8c15-faa9aef0c3f2','0000ae30-0000-1000-8000-00805f9b34fb','0000fee7-0000-1000-8000-00805f9b34fb','0000ffe5-0000-1000-8000-00805f9b34fb','0000ffb0-0000-1000-8000-00805f9b34fb','0000fd00-0000-1000-8000-00805f9b34fb'];
+const KCH=['0000ff02','0000ffe1','0000fff2','00002af1','0000ae01','49535343-8841','bef8d6c9'];
+const BT_SPEED={fast:{n:180,d:8},normal:{n:100,d:20},safe:{n:20,d:15}};
+const lsGet=(k,d)=>{try{return localStorage.getItem(k)||d}catch(e){return d}};
+const btMode=()=>lsGet('pos.btmode','ble'),btSpeed=()=>lsGet('pos.btspeed','auto');
+const BtE=m=>{const e=new Error(m);e.pass=1;return e};
+function btStatus(){return pr&&pr.dev?'เครื่องที่เลือก: '+esc(pr.dev.name||'ไม่ทราบชื่อ')+(pr.dev.gatt&&pr.dev.gatt.connected?' · เชื่อมต่ออยู่':' · ยังไม่เชื่อมต่อ'):'ยังไม่ได้เลือกเครื่องพิมพ์'}
+function btErr(e){
+  const n=(e&&e.name)||'',m=String((e&&e.message)||e||'');
+  if(e&&e.pass)return m;
+  if(/cancel/i.test(m))return 'ยกเลิกการเลือกเครื่องพิมพ์ (กดพิมพ์อีกครั้งแล้วเลือกเครื่องพิมพ์จากรายการ)';
+  if(n==='SecurityError'||/permissions? policy|disallowed|not allowed|blocked/i.test(m))return 'เบราว์เซอร์บล็อกบลูทูธในหน้านี้ ให้เปิดแอปเป็นหน้าเว็บเต็มใน Chrome (ไม่ใช่ในพรีวิวหรือกรอบฝัง) และต้องเป็น https://';
+  if(n==='NotFoundError')return 'ไม่พบเครื่องพิมพ์ที่เลือก ตรวจว่าเปิดเครื่องแล้วและอยู่ใกล้ ๆ ถ้าไม่เห็นเครื่องพิมพ์ในรายการเลย อาจเป็นบลูทูธแบบ Classic ให้ใช้โหมด RawBT ใน ตั้งค่า';
+  if(n==='NetworkError'||/GATT|disconnect|connection|device is no longer/i.test(m))return 'เชื่อมต่อเครื่องพิมพ์ไม่ได้ เปิดเครื่องพิมพ์ ให้อยู่ใกล้เครื่อง และปิดการเชื่อมต่อจากแอปอื่นก่อน แล้วลองใหม่';
+  return m||'พิมพ์ไม่สำเร็จ';
 }
-async function btSend(b){const c=pr.ch;for(let i=0;i<b.length;i+=100){const p=b.slice(i,i+100);c.properties.writeWithoutResponse?await c.writeValueWithoutResponse(p):await c.writeValue(p);await new Promise(r=>setTimeout(r,20))}}
+function btCheck(){
+  if(!window.isSecureContext)throw BtE('ต้องเปิดหน้านี้ผ่าน https:// จึงจะใช้บลูทูธได้');
+  if(!navigator.bluetooth)throw BtE('เบราว์เซอร์นี้ไม่รองรับบลูทูธ ใช้ Chrome/Edge บน Android หรือคอมพิวเตอร์ (iPhone/iPad ใช้แอป Bluefy) หรือเปลี่ยนเป็นโหมด RawBT ใน ตั้งค่า');
+}
+async function btConnect(pick){
+  btCheck();
+  if(pick&&pr){try{pr.dev.gatt.disconnect()}catch(e){}pr=null}
+  if(pr&&pr.ch&&pr.dev.gatt.connected)return;
+  if(!pr){
+    const dev=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:SV});
+    pr={dev};if(dev.addEventListener)dev.addEventListener('gattserverdisconnected',()=>{if(pr&&pr.dev===dev)pr.ch=null});
+  }
+  try{
+    let srv=null,err=null;
+    for(let i=0;i<3&&!srv;i++){try{srv=await pr.dev.gatt.connect()}catch(e){err=e;await sleep(500)}}
+    if(!srv)throw err;
+    const cand=[];
+    for(const sv of await srv.getPrimaryServices())for(const c of await sv.getCharacteristics())if(c.properties.write||c.properties.writeWithoutResponse)cand.push({c,si:SV.indexOf(sv.uuid)});
+    if(!cand.length)throw BtE('ไม่พบช่องส่งข้อมูลของเครื่องพิมพ์ (รุ่นนี้อาจไม่ใช่บลูทูธ BLE) ลองใช้โหมด RawBT ใน ตั้งค่า');
+    const rk=x=>{const k=KCH.findIndex(q0=>(x.c.uuid||'').startsWith(q0));return (k<0?100:k)+(x.c.properties.writeWithoutResponse?0:.5)+(x.si<0?50:x.si/10)};
+    cand.sort((a,b)=>rk(a)-rk(b));pr.ch=cand[0].c;await sleep(250);
+  }catch(e){const d=pr&&pr.dev;try{d&&d.gatt.disconnect()}catch(x){}pr=null;throw e}
+}
+async function btSend(b,plan){
+  const c=pr.ch;
+  for(let i=0;i<b.length;i+=plan.n){
+    if(!pr||!pr.dev.gatt.connected)throw new Error('GATT disconnected');
+    const part=b.slice(i,i+plan.n);
+    if(c.properties.writeWithoutResponse&&c.writeValueWithoutResponse)await c.writeValueWithoutResponse(part);
+    else if(c.writeValueWithResponse)await c.writeValueWithResponse(part);
+    else await c.writeValue(part);
+    await sleep(plan.d);
+  }
+  await sleep(300);
+}
+async function btJob(bytes){
+  await btConnect();
+  const sp=btSpeed(),plans=sp==='auto'?[BT_SPEED.normal,BT_SPEED.safe]:[BT_SPEED[sp]||BT_SPEED.normal];
+  let last=null;
+  for(let k=0;k<plans.length;k++){
+    try{await btSend(bytes,plans[k]);return}
+    catch(e){last=e;console.warn('BT send failed',e);try{pr&&pr.dev.gatt.disconnect()}catch(x){}if(pr)pr.ch=null;
+      if(k<plans.length-1){toast('ส่งไม่สำเร็จ กำลังลองใหม่แบบช้า...',4000);await sleep(700);await btConnect()}}
+  }
+  throw last;
+}
+function escposRaster(cv){
+  const w=cv.width,h=cv.height,bw=w>>3,d=cv.getContext('2d').getImageData(0,0,w,h).data,B=[0x1B,0x40];
+  for(let y0=0;y0<h;y0+=128){const bh=Math.min(128,h-y0);B.push(0x1D,0x76,0x30,0,bw&255,bw>>8,bh&255,bh>>8);
+    for(let y=y0;y<y0+bh;y++)for(let bx=0;bx<bw;bx++){let v=0;for(let k=0;k<8;k++){const i=(y*w+bx*8+k)*4;if(d[i]*.3+d[i+1]*.59+d[i+2]*.11<140)v|=128>>k}B.push(v)}}
+  B.push(0x1B,0x64,4,0x1D,0x56,0x42,0);return new Uint8Array(B);
+}
+function rawbtUrl(bytes){let t='';for(let i=0;i<bytes.length;i+=8192)t+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192));return 'rawbt:base64,'+btoa(t)}
+async function printCanvas(cv){
+  const bytes=escposRaster(cv);
+  if(btMode()==='rawbt'){location.href=rawbtUrl(bytes);return}
+  await btJob(bytes);
+}
+async function testCanvas(){
+  try{await document.fonts.load('700 28px "Noto Sans Thai Looped"')}catch(e){}
+  const W=shop.paper==80?576:384,cv=document.createElement('canvas');cv.width=W;cv.height=170;
+  const x=cv.getContext('2d'),F='"Noto Sans Thai Looped",sans-serif';x.fillStyle='#fff';x.fillRect(0,0,W,170);x.fillStyle='#000';x.textAlign='center';x.textBaseline='top';
+  x.font='700 28px '+F;x.fillText(shop.name||'Tea Counter',W/2,14);x.font='400 22px '+F;x.fillText('ทดสอบเครื่องพิมพ์บลูทูธ',W/2,60);x.fillText('พิมพ์ได้ปกติ '+tm(Date.now()),W/2,94);
+  for(let xx=10;xx<W-10;xx+=8)x.fillRect(xx,138,5,2);return cv;
+}
+document.addEventListener('change',e=>{const t=e.target;if(t.id==='s-btmode'||t.id==='s-btspeed'){try{localStorage.setItem(t.id==='s-btmode'?'pos.btmode':'pos.btspeed',t.value)}catch(x){}toast('บันทึกการตั้งค่าเครื่องพิมพ์แล้ว')}});
 const q=v=>'"'+String(v).replace(/"/g,'""')+'"';
 async function csv(all){
   const os=all?orders:rpOrders(),rows=[['เลขที่ออเดอร์','วันที่','เวลา','ชำระด้วย','สินค้า','ตัวเลือกเสริม','จำนวน','ราคาต่อหน่วย','รวมรายการ','ต้นทุนรวม (รายการ)','กำไร (รายการ)','ส่วนลดออเดอร์','ยอดรวมออเดอร์','ต้นทุนรวม (ออเดอร์)','กำไร (ออเดอร์)','หมายเหตุ','ประเภทออเดอร์','สมาชิก','เบอร์สมาชิก','แต้มที่ได้','แต้มที่ใช้','ส่วนลดแลกแต้ม','พนักงาน','สถานะคืนเงิน','ยอดคืนเงิน']];
@@ -666,16 +743,31 @@ Object.assign(A,{
   reprint(d){const o=orders.find(x=>x.id===d.id);ctx={o};modal(()=>rcptView(o,false))},
   print(){printHtml(rcptBox(ctx.o))},
   async btprint(){
+    if(btBusy)return toast('กำลังพิมพ์อยู่ รอสักครู่');
+    btBusy=true;
     try{
-      await btConnect();toast('กำลังส่งไปเครื่องพิมพ์...');
-      const cv=await rcptCanvas(ctx.o),w=cv.width,h=cv.height,bw=w/8,d=cv.getContext('2d').getImageData(0,0,w,h).data,B=[0x1B,0x40];
-      for(let y0=0;y0<h;y0+=128){const bh=Math.min(128,h-y0);B.push(0x1D,0x76,0x30,0,bw&255,bw>>8,bh&255,bh>>8);
-        for(let y=y0;y<y0+bh;y++)for(let bx=0;bx<bw;bx++){let v=0;for(let k=0;k<8;k++){const i=(y*w+bx*8+k)*4;if(d[i]*.3+d[i+1]*.59+d[i+2]*.11<140)v|=128>>k}B.push(v)}}
-      B.push(0x1B,0x64,4,0x1D,0x56,0x42,0);await btSend(new Uint8Array(B));toast('พิมพ์เรียบร้อย');
-    }catch(e){toast(e.message||'พิมพ์ไม่สำเร็จ')}
+      if(!ctx.o)throw BtE('ไม่พบใบเสร็จที่จะพิมพ์');
+      if(btMode()!=='rawbt')await btConnect();
+      toast(btMode()==='rawbt'?'กำลังส่งไปแอป RawBT...':'กำลังส่งไปเครื่องพิมพ์...',4000);
+      await printCanvas(await rcptCanvas(ctx.o));
+      toast(btMode()==='rawbt'?'ส่งให้ RawBT แล้ว':'พิมพ์เรียบร้อย');
+    }catch(e){console.error('BT print',e);toast(btErr(e),7000)}
+    finally{btBusy=false}
   },
-  btpair(){btConnect().then(()=>toast('เชื่อมต่อเครื่องพิมพ์แล้ว')).catch(e=>toast(e.message||'เชื่อมต่อไม่สำเร็จ'))},
-  settings(){ctx={lg:shop.logo||''};modal(()=>`<h3>ตั้งค่าร้านและใบเสร็จ</h3><div style="height:12px"></div><div class="f"><label>โลโก้ร้าน (แสดงที่หัวใบเสร็จ)</label><div style="display:flex;gap:12px;align-items:center"><div class="lgp" id="l-prev">${lgHtml(ctx.lg)}</div><div class="qk" style="margin:0"><label class="btn" for="l-img" style="cursor:pointer">เลือกรูปโลโก้</label><input id="l-img" type="file" accept="image/*" hidden><button class="btn bad" data-act="logorm">ลบโลโก้</button></div></div></div><div class="f"><label for="s-name">ชื่อร้าน (แสดงแทนโลโก้เมื่อไม่มีโลโก้)</label><input id="s-name" value="${esc(shop.name)}"></div><div class="f"><label for="s-info">รายละเอียดร้านใต้โลโก้ (ที่อยู่ เบอร์โทร เลขผู้เสียภาษี ฯลฯ ขึ้นบรรทัดใหม่ได้)</label><textarea id="s-info" rows="3">${esc(shop.info||'')}</textarea></div><div class="f"><label for="s-foot">ข้อความท้ายใบเสร็จ</label><input id="s-foot" value="${esc(shop.foot)}"></div><div class="two"><div class="f"><label for="s-paper">ความกว้างกระดาษเครื่องพิมพ์</label><select id="s-paper"><option value="58" ${shop.paper==58?'selected':''}>58 มม.</option><option value="80" ${shop.paper==80?'selected':''}>80 มม.</option></select></div><div class="f"><label for="s-pad">ระยะขอบซ้าย-ขวา (มม.)</label><input id="s-pad" type="number" inputmode="decimal" min="0" max="6" step="0.5" value="${shop.pad==null?2:shop.pad}"></div></div><div class="f"><label>ประเภทการสั่งซื้อ (เลือกในหน้าขาย และแสดงบนใบเสร็จ)</label><div id="ot-rows">${(shop.otypes||[]).map(x=>otrow(x)).join('')}</div><button type="button" class="btn" data-act="otadd" style="width:100%">+ เพิ่มประเภท</button></div><div class="f"><label for="s-pin">รหัส PIN เจ้าของร้าน (อย่างน้อย 4 หลัก)</label><input id="s-pin" type="password" inputmode="numeric" value="${esc(shop.pin)}"></div><div class="qk"><button class="btn" data-act="btpair">เชื่อมต่อเครื่องพิมพ์บลูทูธ</button></div><div class="foot"><button class="btn" data-act="close">ปิด</button><button class="btn pri big" data-act="saveshop">บันทึก</button></div>`)},
+  async bttest(){
+    if(btBusy)return toast('กำลังพิมพ์อยู่ รอสักครู่');
+    btBusy=true;
+    try{
+      if(btMode()!=='rawbt')await btConnect();
+      toast('กำลังพิมพ์ทดสอบ...',3000);await printCanvas(await testCanvas());toast('ส่งพิมพ์ทดสอบแล้ว');
+      const st=$('#bt-stat');if(st)st.innerHTML=btStatus();
+    }catch(e){console.error('BT test',e);toast(btErr(e),7000)}
+    finally{btBusy=false}
+  },
+  btpair(){
+    btConnect(true).then(()=>{toast('เชื่อมต่อเครื่องพิมพ์แล้ว');const st=$('#bt-stat');if(st)st.innerHTML=btStatus()}).catch(e=>{console.error('BT pair',e);toast(btErr(e),7000);const st=$('#bt-stat');if(st)st.innerHTML=btStatus()})
+  },
+  settings(){ctx={lg:shop.logo||''};modal(()=>`<h3>ตั้งค่าร้านและใบเสร็จ</h3><div style="height:12px"></div><div class="f"><label>โลโก้ร้าน (แสดงที่หัวใบเสร็จ)</label><div style="display:flex;gap:12px;align-items:center"><div class="lgp" id="l-prev">${lgHtml(ctx.lg)}</div><div class="qk" style="margin:0"><label class="btn" for="l-img" style="cursor:pointer">เลือกรูปโลโก้</label><input id="l-img" type="file" accept="image/*" hidden><button class="btn bad" data-act="logorm">ลบโลโก้</button></div></div></div><div class="f"><label for="s-name">ชื่อร้าน (แสดงแทนโลโก้เมื่อไม่มีโลโก้)</label><input id="s-name" value="${esc(shop.name)}"></div><div class="f"><label for="s-info">รายละเอียดร้านใต้โลโก้ (ที่อยู่ เบอร์โทร เลขผู้เสียภาษี ฯลฯ ขึ้นบรรทัดใหม่ได้)</label><textarea id="s-info" rows="3">${esc(shop.info||'')}</textarea></div><div class="f"><label for="s-foot">ข้อความท้ายใบเสร็จ</label><input id="s-foot" value="${esc(shop.foot)}"></div><div class="two"><div class="f"><label for="s-paper">ความกว้างกระดาษเครื่องพิมพ์</label><select id="s-paper"><option value="58" ${shop.paper==58?'selected':''}>58 มม.</option><option value="80" ${shop.paper==80?'selected':''}>80 มม.</option></select></div><div class="f"><label for="s-pad">ระยะขอบซ้าย-ขวา (มม.)</label><input id="s-pad" type="number" inputmode="decimal" min="0" max="6" step="0.5" value="${shop.pad==null?2:shop.pad}"></div></div><div class="f"><label>ประเภทการสั่งซื้อ (เลือกในหน้าขาย และแสดงบนใบเสร็จ)</label><div id="ot-rows">${(shop.otypes||[]).map(x=>otrow(x)).join('')}</div><button type="button" class="btn" data-act="otadd" style="width:100%">+ เพิ่มประเภท</button></div><div class="f"><label for="s-pin">รหัส PIN เจ้าของร้าน (อย่างน้อย 4 หลัก)</label><input id="s-pin" type="password" inputmode="numeric" value="${esc(shop.pin)}"></div><div class="f"><label>เครื่องพิมพ์บลูทูธ (ตั้งค่าเฉพาะเครื่องนี้)</label><div class="mut" id="bt-stat" style="margin-bottom:8px">${btStatus()}</div><div class="qk" style="flex-wrap:wrap"><button class="btn" data-act="btpair" style="flex:1 1 150px">เชื่อมต่อ / เปลี่ยนเครื่องพิมพ์</button><button class="btn" data-act="bttest" style="flex:1 1 110px">พิมพ์ทดสอบ</button></div><div class="two" style="margin-top:8px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)"><div class="f"><label for="s-btmode">วิธีเชื่อมต่อ</label><select id="s-btmode" style="width:100%;min-width:0"><option value="ble" ${btMode()==='ble'?'selected':''}>บลูทูธ (BLE)</option><option value="rawbt" ${btMode()==='rawbt'?'selected':''}>แอป RawBT</option></select></div><div class="f"><label for="s-btspeed">ความเร็วส่งข้อมูล</label><select id="s-btspeed" style="width:100%;min-width:0"><option value="auto" ${btSpeed()==='auto'?'selected':''}>อัตโนมัติ</option><option value="fast" ${btSpeed()==='fast'?'selected':''}>เร็ว</option><option value="normal" ${btSpeed()==='normal'?'selected':''}>ปกติ</option><option value="safe" ${btSpeed()==='safe'?'selected':''}>ช้า (เสถียรสุด)</option></select></div></div><div class="mut" style="font-size:12px">พิมพ์ไม่ออก/ตัวเพี้ยน: ลองเลือก “ช้า” · ไม่เห็นเครื่องพิมพ์ในรายการ: ลองโหมด RawBT</div></div><div class="foot"><button class="btn" data-act="close">ปิด</button><button class="btn pri big" data-act="saveshop">บันทึก</button></div>`)},
   saveshop(){shop={name:$('#s-name').value.trim()||'Tea Counter',foot:$('#s-foot').value,paper:Number($('#s-paper').value)};store.set('pos.shop',shop);close();toast('บันทึกการตั้งค่าแล้ว')},
   csv(d){csv(!!d.all)},
   rmimg(){ctx.p.img='';$('#f-prev').innerHTML=pic(ctx.p)},
@@ -867,7 +959,7 @@ Object.assign(A,{
 const recStr=(g,o)=>((g.recipe&&g.recipe[o])||[]).map(x=>{const q=ings.find(i=>i.id===x.id);return q?q.name+':'+x.amt:''}).filter(Boolean).join(',');
 function orow(n='',b='',c='',r='',sp=true){
   const v=x=>x===''||!+x?'':x;
-  return `<div class="orow"><label class="oc on"><span>ชื่อตัวเลือก *</span><input class="o-n" value="${esc(n)}" placeholder="เช่น โอวัลตินเฟลก"></label><label class="oc"><span>ราคาพื้นฐาน ฿</span><input class="o-b" type="number" inputmode="decimal" min="0" step="any" placeholder="0" value="${v(b)}"></label><label class="oc"><span>ต้นทุน ฿</span><input class="o-c" type="number" inputmode="decimal" min="0" step="any" placeholder="0" value="${v(c)}"></label><label class="oc"><span>สูตร</span><input class="o-r" value="${esc(r)}" placeholder="โอวัลติน:10"></label><button type="button" class="ox" data-act="gdelrow" aria-label="ลบตัวเลือก">ลบ ✕</button><label class="spt" ${+b>0?'':'style="opacity:.55"'}><input type="checkbox" class="sw sw-s o-sp" role="switch" ${sp?'checked':''}><span><b>เปิดใช้งานราคาพิเศษ</b> — เปิด: คิดราคาพื้นฐานของตัวนี้เดี่ยว ๆ ไม่นับโควตาฟรี · ปิด: นับเป็นตัวเลือกปกติ (ฟรี/เกินตามกลุ่ม)<br><span class="o-hint mut">${+b>0?'':'ใส่ “ราคาพื้นฐาน” ก่อน สวิตช์จึงมีผล'}</span></span></label></div>`;
+  return `<div class="orow"><label class="oc on"><span>ชื่อตัวเลือก *</span><input class="o-n" value="${esc(n)}" placeholder="เช่น โอวัลตินเฟลก"></label><label class="oc"><span>ราคาพื้นฐาน ฿</span><input class="o-b" type="number" inputmode="decimal" min="0" step="any" placeholder="0" value="${v(b)}"></label><label class="oc"><span>ต้นทุน ฿</span><input class="o-c" type="number" inputmode="decimal" min="0" step="any" placeholder="0" value="${v(c)}"></label><label class="oc"><span>สูตร</span><input class="o-r" value="${esc(r)}" placeholder="โอวัลติน:10"></label><button type="button" class="ox" data-act="gdelrow" aria-label="ลบตัวเลือก">ลบ ✕</button><label class="spt" ${+b>0?'':'style="opacity:.55"'}><input type="checkbox" class="sw sw-s o-sp" role="switch" ${sp?'checked':''}><span><b>เปิดใช้งานราคาพิเศษ</b> (คิดราคาพื้นฐานเดี่ยวๆ ไม่รวมโควตา)<br><span class="mut">ปิด = นับตามโควตาปกติของกลุ่ม (ฟรี X อย่างแรก เกินจากนั้นบวกตามเงื่อนไขกลุ่ม)</span><br><span class="o-hint mut">${+b>0?'':'ใส่ “ราคาพื้นฐาน” ก่อน สวิตช์จึงมีผล'}</span></span></label></div>`;
 }
 Object.assign(A,{
   gadd(){$('#g-rows').insertAdjacentHTML('beforeend',orow());const r=document.querySelectorAll('#g-rows .o-n');r[r.length-1].focus();gprev()},
@@ -935,570 +1027,4 @@ A.seedgroups=async()=>{
   store.set('pos.groups',groups);store.set('pos.menu',menu);render();
   toast('เพิ่ม '+add.length+' กลุ่มแล้ว'+(linked?' · ผูกกับเมนู '+linked+' รายการ':'')+(FB.ok&&!FB.ready.groups?' (รอซิงก์ Firebase)':''));
 };
-window.restoreModifiers=()=>A.seedgroups();
-/* ---- Order types ---- */
-const otrow=x=>`<div class="orow otrow" data-id="${esc(x.id||'')}"><label class="oc"><span>ชื่อประเภท</span><input class="ot-n" value="${esc(x.name||'')}" placeholder="เช่น ทานที่ร้าน"></label><button type="button" class="ox" data-act="otdelrow" aria-label="ลบประเภท">ลบ ✕</button></div>`;
-const readOT=()=>[...document.querySelectorAll('#ot-rows .otrow')].map(r=>({id:r.dataset.id||uid(),name:r.querySelector('.ot-n').value.trim()})).filter(x=>x.name);
-function otypeBar(){
-  const L=shop.otypes||[];if(!L.length)return '';
-  const cur=(L.find(x=>x.id===otype)||L[0]).id;
-  return `<div class="ots" role="group" aria-label="ประเภทการสั่งซื้อ">${L.map(x=>`<button class="otb ${x.id===cur?'on':''}" data-act="otype" data-id="${esc(x.id)}">${esc(x.name)}</button>`).join('')}</div>`;
-}
-Object.assign(A,{
-  otype(d){otype=d.id;renderCart()},
-  otadd(){$('#ot-rows').insertAdjacentHTML('beforeend',otrow({}));const r=document.querySelectorAll('#ot-rows .ot-n');r[r.length-1].focus()}
-});
-document.addEventListener('click',e=>{const x=e.target.closest('[data-act="otdelrow"]');if(x)x.closest('.otrow').remove()});
-/* ---- Direct print via hidden iframe (no on-page preview; browser dialog skipped when Chrome runs with --kiosk-printing) ---- */
-let pframe=null,pbusy=false;
-const cleanPrint=()=>{if(pframe){pframe.remove();pframe=null}};
-async function printHtml(html){
-  if(pbusy)return;pbusy=true;cleanPrint();
-  try{
-    const f=document.createElement('iframe');f.setAttribute('aria-hidden','true');f.tabIndex=-1;
-    f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
-    document.body.appendChild(f);pframe=f;
-    const d=f.contentDocument,w=f.contentWindow;
-    d.open();d.write('<!DOCTYPE html><html lang="th"><head><meta charset="utf-8"><title>'+esc(shop.name)+'</title>'+[...document.querySelectorAll('head link[rel=stylesheet],head style')].map(n=>n.outerHTML).join('')+'</head><body>'+html+'</body></html>');d.close();
-    const F='"Noto Sans Thai Looped"',ld=d.fonts?[d.fonts.load('400 14px '+F),d.fonts.load('500 14px '+F),d.fonts.load('700 14px '+F)]:[];
-    await Promise.race([Promise.all([...ld,...[...d.images].map(i=>i.decode?i.decode():0)]).catch(()=>0),new Promise(r=>setTimeout(r,2500))]);
-    let done=false;const fin=()=>{if(done)return;done=true;setTimeout(()=>{if(pframe===f)cleanPrint()},300)};
-    w.onafterprint=fin;setTimeout(fin,600000);
-    w.focus();w.print();
-  }catch(e){cleanPrint();toast('พิมพ์ไม่สำเร็จ')}
-  setTimeout(()=>{pbusy=false},1500);
-}
-['qrrm','logorm'].forEach(k=>OWN.add(k));
-Object.assign(A,{
-  printorder(){if(!cart.length)return;ctx={o:{kind:'order',otype:curOT(),ts:Date.now(),sub:cartSub(),disc:discAmt()+rdmDisc(),total:cartTotal(),note,noPrice:false,items:cart.map(c=>({name:c.name,desc:c.desc,dp:c.dp,qty:c.qty,unit:c.unit}))}};modal(orderView)},
-  qrrm(){shop.qr='';store.set('pos.shop',shop);paint();toast('ลบ QR Code แล้ว')},
-  logorm(){ctx.lg='';const p=$('#l-prev');if(p)p.innerHTML=lgHtml('')}
-});
-document.addEventListener('change',async e=>{
-  const t=e.target,f=t.files&&t.files[0];
-  if(t.id==='o-price'&&ctx.o){ctx.o.noPrice=!t.checked;paint();return}
-  if(t.id==='q-img'&&f){
-    if(role!=='owner')return toast('ต้องเข้าสู่ระบบเจ้าของร้านก่อน');
-    try{shop.qr=await shrink(f,520);store.set('pos.shop',shop);paint();toast('บันทึก QR Code แล้ว')}catch(x){toast('อ่านไฟล์รูปไม่ได้')}
-  }
-  if(t.id==='l-img'&&f){
-    try{ctx.lg=await shrink(f,400);const p=$('#l-prev');if(p)p.innerHTML=lgHtml(ctx.lg)}catch(x){toast('อ่านไฟล์รูปไม่ได้')}
-  }
-});
-function rrow(x={}){
-  const g=ings.find(i=>i.id===x.id);
-  return `<div class="orow rrow"><label class="oc"><span>วัตถุดิบ</span><input class="r-n" list="ing-dl" value="${esc(g?g.name:'')}" placeholder="เช่น นม"></label><label class="oc"><span>ปริมาณ${g&&g.unit?' ('+esc(g.unit)+')':''}</span><input class="r-a" type="number" inputmode="decimal" min="0" step="any" placeholder="0" value="${x.amt||''}"></label><button type="button" class="ox" data-act="rdelrow" aria-label="ลบวัตถุดิบ">ลบ ✕</button></div>`;
-}
-function recRows(){
-  const r=[];
-  document.querySelectorAll('#f-recrows .orow').forEach(w=>{const n=w.querySelector('.r-n').value.trim(),v=parseFloat(w.querySelector('.r-a').value)||0;if(!n||v<=0)return;const id=ingId(n),e=r.find(x=>x.id===id);e?e.amt+=v:r.push({id,amt:v})});
-  store.set('pos.ings',ings);return r;
-}
-A.radd=()=>{$('#f-recrows').insertAdjacentHTML('beforeend',rrow());const r=document.querySelectorAll('#f-recrows .r-n');r[r.length-1].focus()};
-document.addEventListener('click',e=>{
-  const x=e.target.closest('[data-act="rdelrow"]');if(!x)return;
-  const row=x.closest('.orow');
-  if(document.querySelectorAll('#f-recrows .orow').length<2)row.querySelectorAll('input').forEach(i=>i.value='');else row.remove();
-});
-document.addEventListener('input',e=>{if(e.target.id==='q'){query=e.target.value.trim();renderGrid()}});
-document.addEventListener('click',e=>{
-  const x=e.target.closest('[data-act="gdelrow"]');if(!x)return;
-  const row=x.closest('.orow'),all=document.querySelectorAll('#g-rows .orow');
-  if(all.length<2)row.querySelectorAll('input').forEach(i=>i.value='');else row.remove();
-  gprev();
-});
-document.addEventListener('click',e=>{
-  const b=e.target.closest('[data-act]');
-  if(!b){if(e.target.id==='modal')close();return}
-  const f=A[b.dataset.act];f&&(OWN.has(b.dataset.act)&&role!=='owner'?toast('ต้องเข้าสู่ระบบเจ้าของร้านก่อน'):f(b.dataset));
-});
-document.addEventListener('input',e=>{if(e.target.id==='paid'){ctx.paid=e.target.value;upd()}});
-document.addEventListener('change',e=>{if(e.target.id==='rd'&&e.target.value){repDate=e.target.value;render()}});
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&mr)close()});
-/* ================= Members & Points (สมาชิกและสะสมแต้ม) =================
-   - ข้อมูลสมาชิก {id=เบอร์โทร, phone, name, points, ts, log[]} เก็บที่ LocalStorage 'pos.members' และซิงก์ Firestore collection "members"
-   - ทุก ฿50 (ยอดสุทธิหลังส่วนลดทุกชนิด) = 1 แต้ม เฉพาะออเดอร์ที่เลือกสมาชิก
-   - แลกแต้ม: 5 แต้ม = ลด ฿10 | 10 แต้ม = ลด ฿20 หรือขนมฟรี 1 ชิ้น */
-const PT_STEP=50;
-const RD={d10:{p:5,v:10,l:'ลด ฿10'},d20:{p:10,v:20,l:'ลด ฿20'},snack:{p:10,v:0,l:'ขนมฟรี'}};
-const ptsOf=t=>Math.floor(Math.max(0,Number(t)||0)/PT_STEP);
-const curMem=()=>billMem?members.find(x=>x.id===billMem)||null:null;
-const rdLabel=r=>RD[r.t].l+(r.n?': '+r.n:'');
-const rdmPts=()=>rdm.reduce((a,r)=>a+RD[r.t].p,0);
-const rdmDisc=()=>Math.max(0,Math.min(cartSub()-discAmt(),rdm.reduce((a,r)=>a+RD[r.t].v,0)));
-const digits=s=>String(s||'').replace(/\D/g,'');
-function fmtPhone(p){p=digits(p);return p.length===10?p.slice(0,3)+'-'+p.slice(3,6)+'-'+p.slice(6):p}
-function maskPhone(p){p=digits(p);return p.length===10?p.slice(0,3)+'-xxx-'+p.slice(6):(p.length>4?'x'.repeat(p.length-4)+p.slice(-4):p)}
-const memFind=q=>{const l=String(q||'').trim().toLowerCase(),d=digits(q);return members.filter(m=>!l||String(m.name||'').toLowerCase().includes(l)||(d&&m.phone.includes(d)))};
-const dt2=ts=>new Date(ts).toLocaleString('th-TH',{dateStyle:'short',timeStyle:'short'});
-function ptsBox(o){return o&&o.mem?`<div class="ptsbox">⭐ <b>${esc(o.mem.name)}</b> · ได้รับครั้งนี้ <b>+${o.pe||0}</b> แต้ม${o.pu?` · ใช้ไป ${o.pu} แต้ม`:''}<br>แต้มสะสมคงเหลือ <b>${o.pb}</b> แต้ม</div>`:''}
-
-/* keep redemptions valid when cart / discount / member changes */
-function syncRdm(){
-  if(billMem&&!curMem()){billMem=null;rdm=[]}
-  if(!billMem&&(rdm.length||cart.some(c=>c.rid))){rdm=[]}
-  const before=rdm.length;
-  rdm=rdm.filter(r=>r.t!=='snack'||cart.some(c=>c.rid===r.id));
-  cart=cart.filter(c=>!c.rid||rdm.some(r=>r.id===c.rid));
-  let room=cartSub()-discAmt(),used=0;const keep=[];
-  rdm.forEach(r=>{const v=RD[r.t].v;if(!v){keep.push(r);return}if(used+v<=room){used+=v;keep.push(r)}});
-  rdm=keep;
-  const m=curMem();
-  if(m){while(rdmPts()>m.points&&rdm.length){const r=rdm.pop();cart=cart.filter(c=>c.rid!==r.id)}}
-  if(rdm.length!==before)toast('ปรับสิทธิ์แลกแต้มให้ตรงกับยอดบิลแล้ว');
-}
-function memBlock(){
-  const m=curMem();
-  if(!m)return `<div class="mrow"><input id="mph" class="mph" type="tel" inputmode="tel" autocomplete="off" placeholder="👥 เบอร์สมาชิก (ถ้ามี)" aria-label="เบอร์สมาชิก"><button class="btn" data-act="memgo">เลือก</button></div>`;
-  const av=m.points-rdmPts(),earn=ptsOf(cartTotal());
-  return `<div class="mbox"><div class="mtop"><div><b>👥 ${esc(m.name)}</b><div class="mut">${esc(fmtPhone(m.phone))}</div></div><button class="btn bad" data-act="memclear" aria-label="เอาสมาชิกออก">✕</button></div><div>แต้มคงเหลือ <span class="mpts">${av}</span>${rdmPts()?` <span class="mut">(จองใช้ ${rdmPts()})</span>`:''} · บิลนี้ได้ <span class="mpts">+${earn}</span> แต้ม</div>${rdm.length?`<div class="rdc">${rdm.map(r=>`<span class="rdt">${esc(rdLabel(r))}<button data-act="rdmdel" data-id="${r.id}" aria-label="ยกเลิกสิทธิ์">✕</button></span>`).join('')}</div>`:''}<button class="btn" data-act="redeem">🎁 แลกแต้ม</button></div>`;
-}
-function memCk(t){
-  const m=curMem();if(!m)return '';
-  const pe=ptsOf(t),pu=rdmPts();
-  return `<div class="ptsbox">👥 <b>${esc(m.name)}</b> · ${esc(fmtPhone(m.phone))}<br>ครั้งนี้ได้ <b>+${pe}</b> แต้ม${pu?` · ใช้ ${pu} แต้ม`:''} · คงเหลือหลังบิลนี้ <b>${m.points-pu+pe}</b> แต้ม</div>`;
-}
-
-/* ---- Picker (POS) ---- */
-function memPickHtml(){
-  const q=ctx.mq||'',d=digits(q),L=memFind(q).slice(0,30),exact=d&&members.some(m=>m.phone===d);
-  return (L.map(m=>`<button class="mli" data-act="memsel" data-id="${esc(m.id)}"><div><b>${esc(m.name)}</b><div class="mut">${esc(fmtPhone(m.phone))}</div></div><span class="mpts">⭐ ${m.points}</span></button>`).join('')||'<div class="empty">ไม่พบสมาชิก</div>')
-   +(d.length>=9&&!exact?`<button class="btn pri umb" data-act="memnew" data-from="pos" data-ph="${d}">＋ สมัครสมาชิกใหม่ ด้วยเบอร์ ${esc(fmtPhone(d))}</button>`:'');
-}
-function memPickView(){
-  return `<h3>เลือกสมาชิก</h3><div class="f" style="margin-top:10px"><input id="mpq" type="search" class="sbox" placeholder="🔍 เบอร์โทร หรือ ชื่อสมาชิก" value="${esc(ctx.mq||'')}" autocomplete="off"></div><div id="mpl" style="max-height:44dvh;overflow:auto">${memPickHtml()}</div><div class="foot"><button class="btn" data-act="memnew" data-from="pos" data-ph="${digits(ctx.mq)}">＋ สมัครสมาชิกใหม่</button><button class="btn" data-act="close">ปิด</button></div>`;
-}
-
-/* ---- Redeem ---- */
-function rdmView(){
-  const m=curMem();
-  if(!m)return `<h3>แลกแต้ม</h3><div class="empty">ยังไม่ได้เลือกสมาชิก</div><div class="foot"><button class="btn" data-act="close">ปิด</button></div>`;
-  const av=m.points-rdmPts(),room=cartSub()-discAmt()-rdmDisc();
-  if(ctx.sn){
-    let L=menu.filter(p=>p.cat==='ของหวาน');if(!L.length)L=menu;
-    return `<h3>เลือกขนมฟรี 1 ชิ้น</h3><div class="mut">ใช้ ${RD.snack.p} แต้ม · แต้มคงเหลือ ${av}</div><div style="height:10px"></div>${L.map(p=>{const inCart=cart.filter(x=>x.pid===p.id).reduce((a,x)=>a+x.qty,0),out=p.stock!=null&&inCart>=p.stock;return `<button class="mli" data-act="rdmsnack" data-id="${p.id}" ${out?'disabled':''}><div><b>${esc(p.emoji||'')} ${esc(p.name)}</b><div class="mut">${esc(p.cat)} · ${fmt(p.price)}${out?' · หมดสต็อก':''}</div></div><span class="mpts">🎁</span></button>`}).join('')||'<div class="empty">ยังไม่มีเมนู</div>'}<div class="foot"><button class="btn" data-act="rdmback">← ย้อนกลับ</button></div>`;
-  }
-  const opt=(k,label)=>{const r=RD[k],noPts=av<r.p,noRoom=r.v>0&&room<r.v;return `<button class="btn big umb" data-act="rdmadd" data-k="${k}" ${noPts||noRoom?'disabled':''}>${label}<span class="mut"> · ใช้ ${r.p} แต้ม${noPts?' (แต้มไม่พอ)':noRoom?' (ยอดบิลไม่พอ)':''}</span></button>`};
-  return `<h3>แลกแต้ม · ${esc(m.name)}</h3><div class="umrow"><span class="umi">⭐</span><div><div class="bigt">${av}</div><div class="mut">แต้มที่ใช้ได้${rdmPts()?' (หักที่จองไว้แล้ว '+rdmPts()+')':''}</div></div></div>
-  ${opt('d10','ส่วนลดท้ายบิล ฿10')}${opt('d20','ส่วนลดท้ายบิล ฿20')}${opt('snack','🎁 ขนมฟรี 1 ชิ้น')}
-  ${rdm.length?`<div class="rdc" style="margin-bottom:10px">${rdm.map(r=>`<span class="rdt">${esc(rdLabel(r))}<button data-act="rdmdel" data-id="${r.id}" aria-label="ยกเลิกสิทธิ์">✕</button></span>`).join('')}</div>`:''}
-  <div class="mut">แต้มจะถูกหักเมื่อกด “ยืนยันรับเงิน” เท่านั้น · ทางเลือก 10 แต้ม เลือกอย่างใดอย่างหนึ่ง (ขนมฟรี หรือ ลด ฿20)</div>
-  <div class="foot"><button class="btn pri big" data-act="close">เสร็จสิ้น</button></div>`;
-}
-
-/* ---- Member tab ---- */
-let mquery='';
-function memListHtml(){
-  const L=memFind(mquery).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'th')),show=L.slice(0,100);
-  return show.map(m=>`<div class="mli"><div><b>${esc(m.name)}</b> <span class="mpts">⭐ ${m.points}</span><div class="mut">${esc(fmtPhone(m.phone))}</div></div><div class="acts"><button class="btn" data-act="memhist" data-id="${esc(m.id)}">ประวัติ</button><button class="btn own" data-act="memedit" data-id="${esc(m.id)}">แก้ไข</button></div></div>`).join('')
-   +(L.length>100?`<div class="mut" style="text-align:center">แสดง 100 จาก ${L.length} รายการ พิมพ์เพื่อค้นหาเพิ่ม</div>`:'')
-   ||`<div class="empty">${members.length?'ไม่พบสมาชิกที่ค้นหา':'ยังไม่มีสมาชิก กด “สมัครสมาชิกใหม่” เพื่อเริ่มต้น'}</div>`;
-}
-function memView(){
-  const tot=members.reduce((a,m)=>a+(m.points||0),0);
-  return `<div class="wrap"><div class="hd"><h2>สมาชิก (${members.length})</h2><button class="btn pri" data-act="memnew" data-from="tab">＋ สมัครสมาชิกใหม่</button></div>
-  <div class="panel"><div class="rule"><b>กติกาแต้ม</b><br>ทุก ${fmt(PT_STEP)} = 1 แต้ม (เศษไม่ถึง ${fmt(PT_STEP)} ไม่นับ) เฉพาะยอดสุทธิของออเดอร์สมาชิก<br>5 แต้ม = ส่วนลดท้ายบิล ${fmt(10)} · 10 แต้ม = ขนมฟรี 1 ชิ้น หรือส่วนลด ${fmt(20)}</div></div>
-  <input id="mq" type="search" class="sbox" placeholder="🔍 ค้นหาเบอร์โทร หรือ ชื่อสมาชิก" value="${esc(mquery)}" autocomplete="off">
-  <div class="mut" style="margin-bottom:8px">แต้มสะสมคงค้างรวม ${tot} แต้ม</div>
-  <div id="mlist">${memListHtml()}</div></div>`;
-}
-function memFormView(){
-  const m=ctx.m||{},ed=!!ctx.id;
-  return `<h3>${ed?'แก้ไขสมาชิก':'สมัครสมาชิกใหม่'}</h3><div style="height:8px"></div>
-  <div class="f"><label for="m-ph">เบอร์โทร (ใช้เป็นรหัสสมาชิก)</label><input id="m-ph" type="tel" inputmode="tel" autocomplete="off" value="${esc(ed?m.phone:(ctx.ph||''))}" ${ed?'readonly':''}></div>
-  <div class="f"><label for="m-name">ชื่อสมาชิก</label><input id="m-name" autocomplete="off" value="${esc(m.name||'')}" placeholder="เช่น คุณสมชาย"></div>
-  ${role==='owner'?`<div class="f"><label for="m-pts">แต้มสะสม${ed?'':' (เริ่มต้น)'}</label><input id="m-pts" type="number" inputmode="numeric" min="0" step="1" value="${m.points||0}"></div>`:''}
-  ${ed?'<div class="mut">เปลี่ยนเบอร์ไม่ได้ หากต้องการเปลี่ยน ให้ลบสมาชิกแล้วสมัครใหม่</div>':''}
-  <div class="foot">${ed?'<button class="btn bad" data-act="memdel">ลบ</button>':''}<button class="btn" data-act="close">ยกเลิก</button><button class="btn pri big" data-act="memsave">บันทึก</button></div>`;
-}
-function histView(){
-  const m=members.find(x=>x.id===ctx.id);
-  if(!m)return `<h3>ไม่พบสมาชิก</h3><div class="foot"><button class="btn" data-act="close">ปิด</button></div>`;
-  const os=orders.filter(o=>o.mem&&o.mem.id===m.id),spent=os.reduce((a,o)=>a+o.total,0),ev=[];
-  os.forEach(o=>ev.push({ts:o.ts,o,d:(o.pe||0)-(o.pu||0)+refPd(o)}));
-  (m.log||[]).forEach(l=>ev.push({ts:l.ts,l,d:l.d}));
-  ev.sort((a,b)=>b.ts-a.ts);
-  return `<h3>👥 ${esc(m.name)}</h3><div class="mut">${esc(fmtPhone(m.phone))} · สมัครเมื่อ ${m.ts?dt2(m.ts):'-'}</div>
-  <div class="stats" style="margin:12px 0 8px"><div class="stat main"><span>แต้มสะสมคงเหลือ</span><b>${m.points}</b></div><div class="stat"><span class="mut">ซื้อแล้ว ${os.length} ครั้ง</span><b style="font-size:22px">${fmt(spent)}</b></div></div>
-  <div style="max-height:46dvh;overflow:auto">${ev.map(e=>e.o?`<div class="hrow"><div><b>#${String(e.o.no).padStart(3,'0')}</b> · ${fmt(e.o.total)}${rfState(e.o)?` · <span class="dneg">คืนเงิน ${fmt(refAmt(e.o))}</span>`:''}<div class="mut">${dt2(e.ts)}${e.o.pu?' · ใช้ '+e.o.pu+' แต้ม':''}${(e.o.rd||[]).length?' ('+esc(e.o.rd.join(', '))+')':''}</div></div><div class="acts"><span class="${e.d>=0?'dpos':'dneg'}">${e.d>=0?'+':''}${e.d}</span><button class="btn" data-act="reprint" data-id="${e.o.id}">ใบเสร็จ</button></div></div>`:`<div class="hrow"><div><b>${esc(e.l.n||'ปรับแต้ม')}</b><div class="mut">${dt2(e.ts)}</div></div><span class="${e.d>=0?'dpos':'dneg'}">${e.d>=0?'+':''}${e.d}</span></div>`).join('')||'<div class="empty">ยังไม่มีประวัติ</div>'}</div>
-  <div class="foot"><button class="btn" data-act="close">ปิด</button></div>`;
-}
-
-['memedit','memdel','refund','rfmode','rfq','rfgo'].forEach(k=>OWN.add(k));
-Object.assign(A,{
-  memgo(){
-    const i=$('#mph'),v=i?i.value.trim():'',d=digits(v),ex=d&&members.find(m=>m.phone===d);
-    if(ex)return A.memsel({id:ex.id});
-    ctx={mq:v};modal(memPickView);setTimeout(()=>{const e=$('#mpq');e&&e.focus()},60);
-  },
-  memsel(d){
-    if(billMem!==d.id){rdm=[];cart=cart.filter(c=>!c.rid)}
-    billMem=d.id;close();renderCart();
-    const m=curMem();toast('เลือกสมาชิก: '+(m?m.name:''));
-  },
-  memclear(){billMem=null;rdm=[];cart=cart.filter(c=>!c.rid);renderCart()},
-  redeem(){if(!curMem())return;ctx={sn:false};modal(rdmView)},
-  rdmadd(d){
-    const m=curMem();if(!m)return;const r=RD[d.k];if(!r)return;
-    if(m.points-rdmPts()<r.p)return toast('แต้มไม่พอ');
-    if(d.k==='snack'){ctx.sn=true;return paint()}
-    if(cartSub()-discAmt()-rdmDisc()<r.v)return toast('ยอดบิลไม่พอสำหรับส่วนลดนี้');
-    rdm.push({id:uid(),t:d.k});renderCart();paint();
-  },
-  rdmsnack(d){
-    const m=curMem(),p=menu.find(x=>x.id===d.id);if(!m||!p)return;
-    if(m.points-rdmPts()<RD.snack.p)return toast('แต้มไม่พอ');
-    if(p.stock!=null&&cart.filter(x=>x.pid===p.id).reduce((a,x)=>a+x.qty,0)>=p.stock)return toast(p.name+' หมดสต็อก');
-    const id=uid();rdm.push({id,t:'snack',n:p.name});
-    cart.push({key:'rw|'+id,rid:id,pid:p.id,sel:{},name:p.name,cat:p.cat,desc:['🎁 แลกแต้ม (ฟรี)'],xc:0,bp:0,unit:0,cost:p.cost||0,qty:1});
-    ctx.sn=false;renderCart();paint();toast('เพิ่มขนมฟรี: '+p.name);
-  },
-  rdmback(){ctx.sn=false;paint()},
-  rdmdel(d){rdm=rdm.filter(r=>r.id!==d.id);cart=cart.filter(c=>c.rid!==d.id);renderCart();if(mr===rdmView)paint()},
-  memnew(d){ctx={id:'',m:null,ph:digits(d.ph),from:d.from||'tab'};modal(memFormView);setTimeout(()=>{const e=$(ctx.ph?'#m-name':'#m-ph');e&&e.focus()},60)},
-  memedit(d){const m=members.find(x=>x.id===d.id);if(!m)return;ctx={id:m.id,m:{...m},from:'tab'};modal(memFormView)},
-  memhist(d){ctx={id:d.id};modal(histView)},
-  memsave(){
-    const ph=digits($('#m-ph').value),nm=$('#m-name').value.trim(),pe=$('#m-pts'),pv=pe?Math.max(0,parseInt(pe.value)||0):null;
-    if(ctx.id){
-      if(role!=='owner')return toast('ต้องเข้าสู่ระบบเจ้าของร้านก่อน');
-      const m=members.find(x=>x.id===ctx.id);if(!m)return;
-      m.name=nm||m.name;
-      if(pv!=null&&pv!==m.points){m.log=[...(m.log||[]),{ts:Date.now(),d:pv-m.points,n:'เจ้าของปรับแต้ม'}];m.points=pv}
-      store.set('pos.members',members);close();render();toast('บันทึกสมาชิกแล้ว');return;
-    }
-    if(ph.length<9||ph.length>15)return toast('กรอกเบอร์โทรให้ถูกต้อง (9–15 หลัก)');
-    const ex=members.find(x=>x.id===ph);
-    if(ex){toast('เบอร์นี้เป็นสมาชิกอยู่แล้ว');if(ctx.from==='pos')A.memsel({id:ex.id});return}
-    const m={id:ph,phone:ph,name:nm||'สมาชิก '+ph.slice(-4),points:pv||0,ts:Date.now(),log:pv?[{ts:Date.now(),d:pv,n:'แต้มเริ่มต้น'}]:[]};
-    members.push(m);store.set('pos.members',members);
-    if(ctx.from==='pos'){rdm=[];cart=cart.filter(c=>!c.rid);billMem=m.id;close();renderCart();toast('สมัครสมาชิกและเลือกให้บิลนี้แล้ว')}
-    else{close();render();toast('สมัครสมาชิกแล้ว')}
-  },
-  async memdel(){
-    const m=members.find(x=>x.id===ctx.id);if(!m)return;
-    if(!await ask('ลบสมาชิก “'+m.name+'” (แต้ม '+m.points+') ใช่ไหม ประวัติในใบเสร็จเดิมจะยังอยู่','ลบสมาชิก'))return;
-    members=members.filter(x=>x.id!==m.id);if(billMem===m.id){billMem=null;rdm=[];cart=cart.filter(c=>!c.rid)}
-    store.set('pos.members',members);render();toast('ลบสมาชิกแล้ว');
-  }
-});
-document.addEventListener('input',e=>{const t=e.target;if(t.classList&&t.classList.contains('o-b')){const r=t.closest('.orow'),l=r&&r.querySelector('.spt');if(l){const on=parseFloat(t.value)>0;l.style.opacity=on?'':'.55';const h=l.querySelector('.o-hint');if(h)h.textContent=on?'':'ใส่ “ราคาพื้นฐาน” ก่อน สวิตช์จึงมีผล'}}});
-document.addEventListener('input',e=>{
-  if(e.target.id==='mq'){mquery=e.target.value;const l=$('#mlist');if(l)l.innerHTML=memListHtml()}
-  if(e.target.id==='mpq'){ctx.mq=e.target.value;const l=$('#mpl');if(l)l.innerHTML=memPickHtml()}
-});
-document.addEventListener('keydown',e=>{
-  if(e.key!=='Enter')return;
-  if(e.target.id==='mph'){e.preventDefault();A.memgo()}
-  if(e.target.id==='mpq'){e.preventDefault();const d=digits(ctx.mq),ex=d&&members.find(m=>m.phone===d),L=memFind(ctx.mq);if(ex)A.memsel({id:ex.id});else if(L.length===1&&String(ctx.mq||'').trim())A.memsel({id:L[0].id})}
-  if(e.target.id==='m-name'||e.target.id==='m-ph'){e.preventDefault();A.memsave()}
-});
-
-/* ================= Sales Reports & Refunds (รายงานยอดขาย / คืนเงิน) ================= */
-const pdate=s=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||'');return m?new Date(+m[1],+m[2]-1,+m[3]):new Date(new Date().setHours(0,0,0,0))};
-const addD=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x};
-const fr=n=>{n=Math.round((Number(n)||0)*100)/100;return (n<0?'-':'')+fmt(Math.abs(n))};
-const shortN=v=>Math.abs(v)>=1000?(Math.round(v/100)/10)+'k':String(Math.round(v));
-const subOf=o=>o.sub!=null?o.sub:o.items.reduce((a,i)=>a+i.unit*i.qty,0);
-const empOf=o=>o.emp||'ไม่ระบุ';
-const empLabel=()=>role==='owner'?'เจ้าของร้าน':(staffName||'พนักงาน');
-const catOf=it=>it.cat||((menu.find(p=>p.id===it.pid)||menu.find(p=>p.name===it.name)||{}).cat)||'อื่น ๆ';
-const MN=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
-const bno=o=>'#'+String(o.no).padStart(3,'0');
-
-/* ---- refund helpers (o.refunds=[{id,ts,by,shift,items:[{i,q,amt,cb}],amt,rs,full,note,pa,pr,pd}]) ---- */
-const refAmt=o=>(o.refunds||[]).reduce((a,r)=>a+(r.amt||0),0);
-const refPd=o=>(o.refunds||[]).reduce((a,r)=>a+(r.pd||0),0);
-function refRem(o){const rem=o.items.map(i=>i.qty);(o.refunds||[]).forEach(r=>r.items.forEach(x=>{rem[x.i]=Math.max(0,(rem[x.i]||0)-x.q)}));return rem}
-function rfState(o){if(!(o.refunds||[]).length)return '';return refRem(o).every(q=>q<=0)?'full':'partial'}
-function restockLeft(o){const rem=o.items.map(i=>i.qty);(o.refunds||[]).forEach(r=>{if(r.rs)r.items.forEach(x=>{rem[x.i]=Math.max(0,rem[x.i]-x.q)})});return o.items.map((it,i)=>({...it,qty:rem[i]})).filter(x=>x.qty>0)}
-/* refund per line = unit x qty x (bill total / bill subtotal)  -> bill-level discounts are shared fairly; the last refund settles to the exact remainder */
-function refPlan(o,sel){
-  const rem=refRem(o),sub=subOf(o),f=sub?o.total/sub:1,prev=refAmt(o),items=[];let sum=0,all=true;
-  o.items.forEach((it,i)=>{const q=Math.max(0,Math.min(Number(sel[i])||0,rem[i]));if(rem[i]-q>0)all=false;if(q>0){const a=Math.round(it.unit*q*f*100)/100;items.push({i,q,amt:a});sum+=a}});
-  if(all&&items.length){const target=Math.max(0,Math.round((o.total-prev)*100)/100),d=Math.round((target-sum)*100)/100,l=items[items.length-1];l.amt=Math.max(0,Math.round((l.amt+d)*100)/100);sum=target}
-  return {items,amt:Math.round(sum*100)/100,all:all&&items.length>0}
-}
-function refPts(o,pl){const prevAdj=(o.refunds||[]).reduce((a,r)=>a+(r.pa||0),0),after=ptsOf(o.total-refAmt(o)-pl.amt)-(o.pe||0);return{pa:after-prevAdj,pr:pl.all?(o.pu||0):0}}
-function refBox(o,fresh){
-  const st=rfState(o);let h='';
-  if(st)h+=`<div class="rfbox"><b class="dneg">${st==='full'?'คืนเงินแล้ว':'คืนเงินบางส่วน'}</b> · รวม ${fmt(refAmt(o))}${o.refunds.map(r=>`<div class="mut">${dt2(r.ts)} · ${fmt(r.amt)} · ${esc(r.items.map(x=>(o.items[x.i]?o.items[x.i].name:'?')+' ×'+x.q).join(', '))}${r.by?' · โดย '+esc(r.by):''}${r.note?' · '+esc(r.note):''}</div>`).join('')}</div>`;
-  if(!fresh&&role==='owner'&&st!=='full')h+=`<button class="btn bad" data-act="refund" data-id="${o.id}">↩ คืนเงิน (Refund)</button>`;
-  return h;
-}
-function refundView(){
-  const o=orders.find(x=>x.id===ctx.ro);
-  if(!o)return `<h3>ไม่พบบิล</h3><div class="foot"><button class="btn" data-act="close">ปิด</button></div>`;
-  const rem=refRem(o),pl=refPlan(o,ctx.sel),pt=o.mem?refPts(o,pl):null,full=ctx.rmode==='full',map={};pl.items.forEach(x=>map[x.i]=x);
-  return `<h3>↩ คืนเงิน · บิล ${bno(o)}</h3><div class="mut">${dt2(o.ts)} · ยอดบิล ${fmt(o.total)}${refAmt(o)?' · คืนไปแล้ว '+fmt(refAmt(o)):''} · ชำระด้วย ${PM[o.method]||o.method}</div>
-  <div class="chips"><button class="chip ${full?'on':''}" data-act="rfmode" data-m="full">คืนทั้งบิล<small>Full Refund</small></button><button class="chip ${full?'':'on'}" data-act="rfmode" data-m="items">เลือกบางรายการ<small>Partial</small></button></div>
-  <div>${o.items.map((it,i)=>{const q=ctx.sel[i]||0,x=map[i];
-    if(rem[i]<=0)return `<div class="ln" style="grid-template-columns:1fr auto;opacity:.5"><div><b>${esc(it.name)}</b><div class="mut">คืนแล้วครบ ×${it.qty}</div></div><b>—</b></div>`;
-    return `<div class="ln" style="grid-template-columns:minmax(0,1fr) auto auto"><div><b>${esc(it.name)}</b><div class="mut">${esc((it.dp&&it.dp.length?it.dp:(it.desc||[])).join(' / '))||'ไม่มีตัวเลือกเสริม'}<br>${fmt(it.unit)} × ${it.qty}${rem[i]<it.qty?' (คืนได้อีก '+rem[i]+')':''}</div></div>${full?`<b>×${rem[i]}</b>`:`<div class="qty"><button data-act="rfq" data-i="${i}" data-d="-1" aria-label="ลด">−</button><span>${q}</span><button data-act="rfq" data-i="${i}" data-d="1" aria-label="เพิ่ม">+</button></div>`}<b class="${x?'dneg':'mut'}">${x?'-'+fr(x.amt):'—'}</b></div>`}).join('')}</div>
-  <label class="ck" style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="rf-rs" ${ctx.rs?'checked':''}> คืนสินค้า/วัตถุดิบเข้าสต็อก (ไม่ติ๊ก = ของที่ทำไปแล้วนับเป็นต้นทุนที่สูญเสีย)</label>
-  <div class="f" style="margin-top:8px"><label for="rf-note">เหตุผล (ไม่บังคับ)</label><input id="rf-note" value="${esc(ctx.note||'')}" placeholder="เช่น ทำผิด, ลูกค้าไม่รับ"></div>
-  <div class="tot"><span>ยอดคืนเงิน</span><b class="dneg">${fr(pl.amt)}</b></div>
-  <div class="mut">${o.method==='cash'?'คืนเป็นเงินสด หักจากลิ้นชัก':'คืนผ่านช่องทางเดิม ('+(PM[o.method]||o.method)+')'}${pt?` · แต้มสมาชิก ${pt.pa+pt.pr>=0?'+':''}${pt.pa+pt.pr}`:''}</div>
-  <div class="foot"><button class="btn" data-act="close">ยกเลิก</button><button class="btn pri big" data-act="rfgo" ${pl.items.length?'':'disabled'}>ยืนยันคืนเงิน ${fr(pl.amt)}</button></div>`;
-}
-Object.assign(A,{
-  refund(d){const o=orders.find(x=>x.id===d.id);if(!o)return;if(rfState(o)==='full')return toast('บิลนี้คืนเงินครบแล้ว');ctx={ro:o.id,rmode:'full',sel:Object.fromEntries(refRem(o).map((q,i)=>[i,q])),rs:false,note:''};modal(refundView)},
-  rfmode(d){const o=orders.find(x=>x.id===ctx.ro);if(!o)return;ctx.rmode=d.m;ctx.sel=d.m==='full'?Object.fromEntries(refRem(o).map((q,i)=>[i,q])):{};paint()},
-  rfq(d){const o=orders.find(x=>x.id===ctx.ro);if(!o)return;const rem=refRem(o),i=Number(d.i);ctx.sel[i]=Math.max(0,Math.min(rem[i],(ctx.sel[i]||0)+Number(d.d)));ctx.rmode='items';paint()},
-  rfgo(){
-    const o=orders.find(x=>x.id===ctx.ro);if(!o)return;
-    const pl=refPlan(o,ctx.sel);if(!pl.items.length)return toast('เลือกรายการที่จะคืนก่อน');
-    const rs=!!ctx.rs;pl.items.forEach(x=>{const it=o.items[x.i];x.cb=rs?Math.round((it.cost||0)*x.q*100)/100:0});
-    const r={id:uid(),ts:Date.now(),by:empLabel(),shift:shift?shift.id:null,items:pl.items,amt:pl.amt,rs,full:pl.all,note:(ctx.note||'').trim()};
-    if(o.mem){const m=members.find(x=>x.id===o.mem.id);if(m){const p=refPts(o,pl),b=m.points;m.points=Math.max(0,b+p.pa+p.pr);r.pa=p.pa;r.pr=p.pr;r.pd=m.points-b;store.set('pos.members',members)}}
-    if(rs)stockMove(pl.items.map(x=>({...o.items[x.i],qty:x.q})),1);
-    o.refunds=[...(o.refunds||[]),r];o.rfs=rfState(o);
-    store.set('pos.orders',orders);close();render();toast('คืนเงิน '+fr(pl.amt)+' แล้ว'+(o.method==='cash'?' (เงินสด)':''));
-  }
-});
-document.addEventListener('change',e=>{if(e.target.id==='rf-rs')ctx.rs=e.target.checked});
-document.addEventListener('input',e=>{if(e.target.id==='rf-note')ctx.note=e.target.value});
-
-/* ---- report state / range ---- */
-const T0=ymd(new Date());
-let rp={mode:'day',anchor:T0,from:ymd(addD(new Date(),-6)),to:T0,emp:'',tab:'sum',met:'net'};
-function rpRange(){
-  const A0=pdate(rp.anchor);let a,b;
-  if(rp.mode==='day'){a=A0;b=addD(A0,1)}
-  else if(rp.mode==='week'){a=addD(A0,-((A0.getDay()+6)%7));b=addD(a,7)}
-  else if(rp.mode==='month'){a=new Date(A0.getFullYear(),A0.getMonth(),1);b=new Date(A0.getFullYear(),A0.getMonth()+1,1)}
-  else if(rp.mode==='year'){a=new Date(A0.getFullYear(),0,1);b=new Date(A0.getFullYear()+1,0,1)}
-  else{a=pdate(rp.from);b=addD(pdate(rp.to),1);if(b<=a)b=addD(a,1)}
-  return{a:+a,b:+b,from:ymd(a),to:ymd(addD(b,-1)),emp:rp.emp}
-}
-function rpLabel(R){
-  const A0=pdate(rp.anchor),f=(d,o)=>d.toLocaleDateString('th-TH',o);
-  if(rp.mode==='day')return f(A0,{weekday:'long',day:'numeric',month:'long',year:'numeric'});
-  if(rp.mode==='week'){const s=new Date(R.a),e=addD(new Date(R.b),-1);return f(s,{day:'numeric',month:'short'})+' – '+f(e,{day:'numeric',month:'short',year:'numeric'})}
-  if(rp.mode==='month')return f(A0,{month:'long',year:'numeric'});
-  if(rp.mode==='year')return 'ปี '+f(A0,{year:'numeric'});
-  return f(pdate(R.from),{day:'numeric',month:'short',year:'numeric'})+' – '+f(pdate(R.to),{day:'numeric',month:'short',year:'numeric'});
-}
-const granOf=R=>{const days=Math.round((R.b-R.a)/864e5);return rp.mode==='day'||days<=1?'h':rp.mode==='year'?'m':rp.mode==='custom'?(days<=62?'d':'m'):'d'};
-function rpData(R){
-  const SO=[],SL=[],RF=[],RL=[];
-  orders.forEach(o=>{
-    if(R.emp&&empOf(o)!==R.emp)return;
-    const sub=subOf(o),f=sub?o.total/sub:1;
-    if(o.ts>=R.a&&o.ts<R.b){SO.push(o);o.items.forEach((it,i)=>SL.push({o,it,i,q:it.qty,g:it.unit*it.qty,n:it.unit*it.qty*f,c:(it.cost||0)*it.qty}))}
-    (o.refunds||[]).forEach(r=>{if(r.ts>=R.a&&r.ts<R.b){RF.push({o,r});r.items.forEach(x=>RL.push({o,r,x,it:o.items[x.i]||{name:'(รายการถูกลบ)',unit:0,qty:0}}))}});
-  });
-  return{SO,SL,RF,RL};
-}
-const rpOrders=()=>rpData(rpRange()).SO.sort((a,b)=>a.ts-b.ts);
-const cbOf=r=>r.items.reduce((a,x)=>a+(x.cb||0),0);
-function rpMetrics(D){
-  const m={gross:0,disc:0,total:0,cost:0,ref:0,cb:0,bills:D.SO.length,refN:D.RF.length};
-  D.SO.forEach(o=>{m.gross+=subOf(o);m.disc+=(o.disc||0)+(o.rdisc||0);m.total+=o.total;m.cost+=o.cost||0});
-  D.RF.forEach(({r})=>{m.ref+=r.amt||0;m.cb+=cbOf(r)});
-  m.net=m.total-m.ref;m.profit=m.total-m.cost-m.ref+m.cb;m.avg=m.bills?m.net/m.bills:0;return m;
-}
-function buckets(R,g,D){
-  const L=[],ix={},z=()=>({net:0,profit:0,bills:0});
-  if(g==='h')for(let h=0;h<24;h++){ix[h]=L.length;L.push({l:pad(h),t:pad(h)+':00 – '+pad(h)+':59',...z()})}
-  else if(g==='d')for(let d=new Date(R.a);d.getTime()<R.b;d.setDate(d.getDate()+1)){ix[ymd(d)]=L.length;L.push({l:String(d.getDate()),t:d.toLocaleDateString('th-TH',{weekday:'short',day:'numeric',month:'short'}),...z()})}
-  else{const s=new Date(R.a);for(let d=new Date(s.getFullYear(),s.getMonth(),1);d.getTime()<R.b;d.setMonth(d.getMonth()+1)){ix[d.getFullYear()+'-'+pad(d.getMonth()+1)]=L.length;L.push({l:MN[d.getMonth()],t:d.toLocaleDateString('th-TH',{month:'long',year:'numeric'}),...z()})}}
-  const kf=ts=>{const d=new Date(ts);return g==='h'?d.getHours():g==='d'?ymd(d):d.getFullYear()+'-'+pad(d.getMonth()+1)};
-  D.SO.forEach(o=>{const b=L[ix[kf(o.ts)]];if(!b)return;b.net+=o.total;b.profit+=o.total-(o.cost||0);b.bills++});
-  D.RF.forEach(({r})=>{const b=L[ix[kf(r.ts)]];if(!b)return;b.net-=r.amt;b.profit-=r.amt-cbOf(r)});
-  return L;
-}
-function chartHtml(B,met){
-  const mx=Math.max(1,...B.map(b=>Math.abs(b[met]))),n=B.length,showV=n<=8,step=n>24?4:n>12?2:1,f=v=>met==='bills'?String(v):shortN(v);
-  return `<div class="chart" role="group" aria-label="กราฟ">${B.map(b=>{const v=b[met],h=Math.abs(v)/mx*80;return `<button class="cb ${v<0?'neg':''}" data-act="cbtip" data-t="${esc(b.t)}" data-v="${met==='bills'?v+' บิล':fr(v)}" aria-label="${esc(b.t)}">${showV&&v?`<em>${f(v)}</em>`:''}<i style="height:${v?Math.max(h,2):0}%"></i></button>`}).join('')}</div><div class="cl">${B.map((b,i)=>`<span>${i%step===0?esc(b.l):''}</span>`).join('')}</div><div class="mut" style="font-size:12px">แตะแท่งกราฟเพื่อดูตัวเลข · สูงสุด ${met==='bills'?mx+' บิล':fr(mx)}</div>`;
-}
-A.cbtip=d=>toast(d.t+': '+d.v);
-
-/* ---- generic aggregations ---- */
-function lineAgg(D,kf){
-  const A0={},get=it=>{const k=kf(it);return A0[k]||(A0[k]={k,cat:catOf(it),q:0,n:0,c:0,rq:0,ra:0,cb:0})};
-  D.SL.forEach(s=>{const a=get(s.it);a.q+=s.q;a.n+=s.n;a.c+=s.c});
-  D.RL.forEach(({it,x})=>{const a=get(it);a.q-=x.q;a.rq+=x.q;a.ra+=x.amt;a.cb+=x.cb||0});
-  return Object.values(A0).map(a=>({...a,net:a.n-a.ra,pf:a.n-a.c-a.ra+a.cb})).sort((a,b)=>b.net-a.net);
-}
-function ordAgg(D,kf){
-  const A0={},get=o=>{const k=kf(o);return A0[k]||(A0[k]={k,b:0,t:0,c:0,r:0,cb:0})};
-  D.SO.forEach(o=>{const a=get(o);a.b++;a.t+=o.total;a.c+=o.cost||0});
-  D.RF.forEach(({o,r})=>{const a=get(o);a.r+=r.amt;a.cb+=cbOf(r)});
-  return Object.values(A0).map(a=>({...a,net:a.t-a.r,pf:a.t-a.c-a.r+a.cb})).sort((a,b)=>b.net-a.net);
-}
-function modAgg(D){
-  const A0={},get=m=>{const k=m.g+'|'+m.o;return A0[k]||(A0[k]={g:m.g,o:m.o,q:0,rev:0})};
-  const modsOf=it=>it.mods||(()=>{const sel=selOf(it),out=[];groups.forEach(g=>{let rn=0;(sel[g.id]||[]).forEach(o=>{if(isSp(g,o))out.push({g:g.name,o,r:g.price[o]});else{rn++;out.push({g:g.name,o,r:rn>(g.free||0)&&g.extra?g.extra:0})}})});return out})();
-  D.SL.forEach(s=>modsOf(s.it).forEach(m=>{const a=get(m);a.q+=s.q;a.rev+=(m.r||0)*s.q}));
-  D.RL.forEach(({it,x})=>modsOf(it).forEach(m=>{const a=get(m);a.q-=x.q;a.rev-=(m.r||0)*x.q}));
-  return Object.values(A0).filter(a=>a.q>0||a.rev).sort((a,b)=>b.q-a.q||b.rev-a.rev);
-}
-const tbl=(head,rows)=>rows.length?`<div class="tw"><table class="tb"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`:'<div class="empty">ยังไม่มีข้อมูลในช่วงเวลานี้</div>';
-const bar2=(v,mx)=>`<div class="bar2"><s style="width:${mx>0?Math.max(0,v)/mx*100:0}%"></s></div>`;
-const rcellName=(name,sub,v,mx)=>`<b>${esc(name)}</b>${sub?`<div class="mut">${sub}</div>`:''}${bar2(v,mx)}`;
-
-/* ---- sub reports ---- */
-const TT={sum:'สรุปยอดขาย (Sales Summary)',item:'ยอดขายตามสินค้า (Sales by Item)',cat:'ยอดขายแยกตามหมวดหมู่ (Sales by Category)',emp:'ยอดขายแยกตามพนักงาน (Sales by Employee)',pay:'ยอดขายแยกตามประเภทการชำระเงิน (Sales by Payment Type)',mod:'ยอดขายแยกตามตัวเลือกเสริม (Sales by Modifiers)',rcpt:'รายการใบเสร็จรับเงิน (Receipts)'};
-const RTABS=[['sum','สรุปยอดขาย'],['item','ตามสินค้า'],['cat','ตามหมวดหมู่'],['emp','ตามพนักงาน'],['pay','ตามการชำระเงิน'],['mod','ตามตัวเลือกเสริม'],['rcpt','ใบเสร็จ']];
-const shiftPanel=R=>{const L=shifts.filter(x=>x.ts>=R.a&&x.ts<R.b);return `<h3 style="margin:18px 0 6px">กะทำงานและเงินในลิ้นชัก</h3>${L.map(x=>`<div class="ord"><b>${tm(x.ts)}-${tm(x.end)}</b><div>ยอดขาย ${fmt(x.sales)} · ควรมี ${fmt(x.exp)} · นับได้ ${fmt(x.counted)}</div><b style="color:${x.diff<0?'var(--bad)':'var(--brand)'}">${x.diff>0?'เกิน ':x.diff<0?'ขาด ':'ตรง '}${x.diff?fmt(Math.abs(x.diff)):''}</b></div>`).join('')||'<div class="empty">ไม่มีกะที่ปิดในช่วงนี้</div>'}`};
-const refundLog=D=>D.RF.length?`<h3 style="margin:18px 0 6px">รายการคืนเงิน (${D.RF.length})</h3>${[...D.RF].sort((a,b)=>b.r.ts-a.r.ts).map(({o,r})=>`<div class="ord" style="grid-template-columns:auto 1fr auto"><b>${bno(o)}</b><div><div>${esc(r.items.map(x=>(o.items[x.i]?o.items[x.i].name:'?')+' ×'+x.q).join(', '))}</div><div class="mut">${dt2(r.ts)} · ${r.full?'คืนครบบิล':'คืนบางรายการ'}${r.by?' · โดย '+esc(r.by):''}${r.note?' · '+esc(r.note):''}</div></div><b class="dneg">-${fr(r.amt)}</b></div>`).join('')}`:'';
-function sumBody(R,D){
-  const g=granOf(R),B=buckets(R,g,D),rows=B.filter(b=>b.bills||b.net||b.profit);
-  return `<div class="hd" style="margin-bottom:6px"><div><h3 style="margin:0">ยอดขายตามช่วงเวลา</h3><div class="mut">${{h:'แยกรายชั่วโมง',d:'แยกรายวัน',m:'แยกรายเดือน'}[g]}</div></div><div class="seg" style="min-width:240px">${[['net','ยอดขายสุทธิ'],['profit','กำไร'],['bills','จำนวนบิล']].map(([k,l])=>`<button class="${rp.met===k?'on':''}" data-act="rpmet" data-k="${k}">${l}</button>`).join('')}</div></div>
-  ${chartHtml(B,rp.met)}
-  ${rows.length?tbl(['ช่วง','บิล','ยอดสุทธิ','กำไร'],rows.map(b=>[esc(b.t),b.bills,fr(b.net),fr(b.profit)])):'<div class="empty">ยังไม่มีการขายในช่วงเวลานี้</div>'}
-  ${refundLog(D)}${shiftPanel(R)}`;
-}
-function itemBody(D,byCat){
-  const L=lineAgg(D,byCat?it=>catOf(it):it=>it.name),mx=Math.max(0,...L.map(a=>a.net)),tq=L.reduce((a,x)=>a+x.q,0),tn=L.reduce((a,x)=>a+x.net,0);
-  return tbl([byCat?'หมวดหมู่':'สินค้า','จำนวน','ยอดสุทธิ',byCat?'สัดส่วน':'กำไร'],L.map(a=>[rcellName(a.k,(byCat?'':esc(a.cat)+' · ')+(a.rq?'คืน '+a.rq+' · ':'')+(a.q?'':'')+'ต้นทุน '+fr(a.c-a.cb),a.net,mx),a.q,fr(a.net),byCat?(tn>0?Math.round(a.net/tn*100)+'%':'-'):fr(a.pf)]))
-   +(L.length?`<div class="mut" style="margin-top:8px">รวม ${tq} ชิ้น · ${fr(tn)} (หลังหักส่วนลดท้ายบิลและคืนเงิน)</div>`:'');
-}
-function empBody(D){
-  const L=ordAgg(D,o=>empOf(o)),mx=Math.max(0,...L.map(a=>a.net));
-  return `<div class="mut" style="margin-bottom:8px">แสดงพนักงานทุกคน (ไม่ใช้ตัวกรองพนักงาน) · ชื่อพนักงานมาจากช่อง “ชื่อพนักงาน” ตอนเข้าสู่ระบบ</div>`+tbl(['พนักงาน','บิล','ยอดสุทธิ','กำไร'],L.map(a=>[rcellName(a.k,'เฉลี่ย '+fr(a.b?a.net/a.b:0)+'/บิล'+(a.r?' · คืนเงิน '+fr(a.r):''),a.net,mx),a.b,fr(a.net),fr(a.pf)]));
-}
-function payBody(D){
-  const L=ordAgg(D,o=>o.method),mx=Math.max(0,...L.map(a=>a.net)),tn=L.reduce((a,x)=>a+x.net,0);
-  return tbl(['ประเภทชำระเงิน','บิล','ยอดสุทธิ','สัดส่วน'],L.map(a=>[rcellName({cash:'เงินสด',qr:'โอนผ่าน QR (PromptPay)',card:'บัตร'}[a.k]||a.k,a.r?'คืนเงิน '+fr(a.r):'',a.net,mx),a.b,fr(a.net),tn>0?Math.round(a.net/tn*100)+'%':'-']));
-}
-function modBody(D){
-  const L=modAgg(D),mx=Math.max(1,...L.map(a=>a.q));
-  return `<div class="mut" style="margin-bottom:8px">จำนวนครั้งที่ลูกค้าเลือก และรายได้เพิ่มจากตัวเลือกนั้น (ราคาพิเศษ / ค่าส่วนเกินโควตา ก่อนส่วนลดท้ายบิล) บิลเก่าที่ไม่ได้บันทึกรายละเอียด จะคำนวณจากราคาตัวเลือกปัจจุบัน</div>`+tbl(['ตัวเลือกเสริม','จำนวนครั้ง','รายได้เพิ่ม'],L.map(a=>[rcellName(a.o,esc(a.g),a.q,mx),a.q,a.rev?fr(a.rev):'—']));
-}
-function rcptBody(D){
-  const L=[...D.SO].sort((a,b)=>b.ts-a.ts),show=L.slice(0,150);
-  return (show.map(o=>{const st=rfState(o),ra=refAmt(o);return `<div class="rcrow"><div><b>${bno(o)}</b> <span class="mut">${dt2(o.ts)}</span> ${st?`<span class="badge bad">${st==='full'?'คืนเงินแล้ว':'คืนเงินบางส่วน'}</span>`:''}<div class="mut">${esc(empOf(o))} · ${PM[o.method]||o.method}${o.otype?' · '+esc(o.otype):''}${o.mem?' · 👥 '+esc(o.mem.name):''}</div><div class="mut">${esc(o.items.map(i=>i.name+' ×'+i.qty).join(', '))}</div></div><div style="text-align:right"><b>${fmt(o.total)}</b>${ra?`<div class="dneg">คืน -${fr(ra)}</div><div class="mut">สุทธิ ${fr(o.total-ra)}</div>`:''}</div>
-    <div class="rs"><button class="btn" data-act="reprint" data-id="${o.id}">ดู/พิมพ์ใบเสร็จ</button>${st!=='full'?`<button class="btn bad" data-act="refund" data-id="${o.id}">↩ คืนเงิน</button>`:''}<button class="btn bad" data-act="odel" data-id="${o.id}">ลบ</button></div></div>`}).join('')||'<div class="empty">ไม่มีใบเสร็จในช่วงเวลานี้</div>')
-   +(L.length>150?`<div class="mut" style="text-align:center;padding:8px">แสดง 150 จาก ${L.length} ใบ (ล่าสุด) · ปรับช่วงวันที่เพื่อดูบิลเก่า</div>`:'');
-}
-function rpBody(R,D){
-  switch(rp.tab){
-    case 'item':return itemBody(D,false);
-    case 'cat':return itemBody(D,true);
-    case 'emp':return empBody(rpData({...R,emp:''}));
-    case 'pay':return payBody(D);
-    case 'mod':return modBody(D);
-    case 'rcpt':return rcptBody(D);
-    default:return sumBody(R,D);
-  }
-}
-function rpBar(R){
-  const emps=[...new Set(orders.map(empOf))].sort((a,b)=>a.localeCompare(b,'th'));if(rp.emp&&!emps.includes(rp.emp))emps.push(rp.emp);
-  const modes=[['day','รายวัน','วัน'],['week','รายสัปดาห์','สัปดาห์'],['month','รายเดือน','เดือน'],['year','รายปี','ปี'],['custom','กำหนดเอง','ช่วงวันที่']];
-  return `<div class="rpbar"><div class="seg" role="group" aria-label="มุมมองเวลา">${modes.map(([k,l,s])=>`<button class="${rp.mode===k?'on':''}" data-act="rpmode" data-m="${k}"><span class="sl">${l}</span><span class="ss">${s}</span></button>`).join('')}</div>
-  ${rp.mode==='custom'
-    ?`<div class="rpcustom"><div class="f"><label for="rp-from">ตั้งแต่วันที่</label><input type="date" id="rp-from" value="${rp.from}"></div><div class="f"><label for="rp-to">ถึงวันที่</label><input type="date" id="rp-to" value="${rp.to}"></div></div><div class="rppre">${[['0','วันนี้'],['y','เมื่อวาน'],['7','7 วัน'],['30','30 วัน'],['all','ทั้งหมด']].map(([k,l])=>`<button class="btn" data-act="rppre" data-k="${k}">${l}</button>`).join('')}</div>`
-    :`<div class="rpnav"><button class="btn" data-act="rpshift" data-d="-1" aria-label="ก่อนหน้า">‹</button><input type="date" id="rp-date" value="${rp.anchor}" aria-label="เลือกวันที่"><button class="btn" data-act="rpshift" data-d="1" aria-label="ถัดไป">›</button></div>`}
-  <div class="rplab">${esc(rpLabel(R))}</div>
-  <div class="f rpemp"><label for="rp-emp">ตัวกรองพนักงาน</label><select id="rp-emp"><option value="">ทั้งหมด</option>${emps.map(e=>`<option value="${esc(e)}" ${rp.emp===e?'selected':''}>${esc(e)}</option>`).join('')}</select></div></div>`;
-}
-function kpiHtml(M){
-  return `<div class="kpis"><div class="kpi main"><span>ยอดขายสุทธิ</span><b>${fr(M.net)}</b><small>${M.bills} บิล · เฉลี่ย ${fr(M.avg)}/บิล</small></div>
-  <div class="kpi ${M.profit<0?'neg':''}"><span>กำไรรวม</span><b>${fr(M.profit)}</b><small>ต้นทุน ${fr(M.cost-M.cb)}</small></div>
-  <div class="kpi"><span>ยอดขายรวม (ก่อนลด)</span><b>${fr(M.gross)}</b><small>ยอดบิลที่ชำระ ${fr(M.total)}</small></div>
-  <div class="kpi"><span>ส่วนลด</span><b>${fr(M.disc)}</b><small>รวมส่วนลดแลกแต้ม</small></div>
-  <div class="kpi rf"><span>ยอดคืนเงิน</span><b>${fr(M.ref)}</b><small>${M.refN} รายการ</small></div></div>`;
-}
-function repView(){
-  const R=rpRange();repDate=R.from;const D=rpData(R),M=rpMetrics(D);
-  return `<div class="wrap"><div class="hd"><h2>ยอดขาย / รายงาน</h2><div class="acts"><button class="btn" data-act="csv" data-all="">⬇ CSV ช่วงนี้</button><button class="btn" data-act="csv" data-all="1">⬇ CSV ทั้งหมด</button></div></div>
-  ${rpBar(R)}${kpiHtml(M)}
-  <div class="rtabs" role="tablist">${RTABS.map(([k,l])=>`<button class="rtab ${rp.tab===k?'on':''}" role="tab" data-act="rptab" data-k="${k}">${l}</button>`).join('')}</div>
-  <div class="panel"><h3 style="margin-bottom:10px">${TT[rp.tab]}</h3>${rpBody(R,D)}</div>
-  <button class="btn bad" data-act="wipe">ล้างประวัติการขายทั้งหมด</button></div>`;
-}
-Object.assign(A,{
-  rpmode(d){if(d.m==='custom'&&rp.mode!=='custom'){const R=rpRange();rp.from=R.from;rp.to=R.to}rp.mode=d.m;render()},
-  rpshift(d){const x=pdate(rp.anchor),n=Number(d.d);if(rp.mode==='day')x.setDate(x.getDate()+n);else if(rp.mode==='week')x.setDate(x.getDate()+7*n);else if(rp.mode==='month'){x.setDate(1);x.setMonth(x.getMonth()+n)}else{x.setDate(1);x.setFullYear(x.getFullYear()+n)}rp.anchor=ymd(x);render()},
-  rptab(d){rp.tab=d.k;render()},
-  rpmet(d){rp.met=d.k;render()},
-  rppre(d){const t=new Date();let f=new Date(t),e=new Date(t);if(d.k==='y'){f=addD(t,-1);e=f}else if(d.k==='7')f=addD(t,-6);else if(d.k==='30')f=addD(t,-29);else if(d.k==='all')f=new Date(orders.reduce((a,o)=>Math.min(a,o.ts),Date.now()));rp.mode='custom';rp.from=ymd(f);rp.to=ymd(e);render()}
-});
-document.addEventListener('change',e=>{
-  const t=e.target;if(!t.id)return;
-  if(t.id==='rp-date'&&t.value){rp.anchor=t.value;render()}
-  if(t.id==='rp-from'&&t.value){rp.from=t.value;if(rp.to<rp.from)rp.to=rp.from;render()}
-  if(t.id==='rp-to'&&t.value){rp.to=t.value;if(rp.to<rp.from)rp.from=rp.to;render()}
-  if(t.id==='rp-emp'){rp.emp=t.value;render()}
-});
-
-/* ================= Firebase / Cloud Firestore sync =================
-   - ทุกครั้งที่โค้ดเดิมเรียก store.set() ข้อมูลจะถูกเขียนลง LocalStorage ก่อนเสมอ (Fallback) แล้วค่อยส่งขึ้น Firestore
-   - ถ้าโหลด SDK หรือเชื่อมต่อไม่ได้ ระบบยังทำงานแบบเครื่องเดียวต่อไปตามปกติ */
-const firebaseConfig={apiKey:"AIzaSyAIS0kUvXYIR54K4kwda-f1h6O1dpAOBRQ",authDomain:"shop-pos-a171b.firebaseapp.com",projectId:"shop-pos-a171b",storageBucket:"shop-pos-a171b.firebasestorage.app",messagingSenderId:"48104147246",appId:"1:48104147246:web:1ce37cc7621387496252bf",measurementId:"G-E7JSXW6BT4"};
-const SDK=[['https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/','.min.js'],['https://cdn.jsdelivr.net/npm/firebase@10.12.2/','.js']];
-const FB={ok:false,db:null,live:false,ready:{}},last={};
-const SY={ok:['☁','ซิงก์แล้ว','ok'],connecting:['⏳','กำลังเชื่อมต่อ','wait'],offline:['⚠','ออฟไลน์ บันทึกในเครื่อง','off'],local:['💾','โหมดเครื่องเดียว','wait']};
-function setSync(k){const e=$('#sync');if(!e)return;const [i,t,c]=SY[k];e.className='syncb '+c;e.innerHTML=i+' <span class="t">'+t+'</span>';e.title=t}
-const loadJS=u=>new Promise((res,rej)=>{const e=document.createElement('script');e.src=u;e.onload=res;e.onerror=rej;document.head.appendChild(e)});
-const COLS={
-  menu:{key:'pos.menu',get:()=>menu,put:v=>{menu=v}},
-  groups:{key:'pos.groups',get:()=>groups,put:v=>{groups=v}},
-  ingredients:{key:'pos.ings',get:()=>ings,put:v=>{ings=v}},
-  orders:{key:'pos.orders',get:()=>orders,put:v=>{orders=v.sort((a,b)=>a.ts-b.ts)}},
-  members:{key:'pos.members',get:()=>members,put:v=>{members=v}}
-};
-const KEYS={'pos.menu':'menu','pos.groups':'groups','pos.ings':'ingredients','pos.orders':'orders','pos.members':'members','pos.shop':'shop'};
-const rawSet=store.set.bind(store);
-store.set=(k,v)=>{rawSet(k,v);const c=KEYS[k];if(c)c==='shop'?pushShop(v):push(c,v)};
-function fail(e){setSync('offline');console.warn('Firestore:',e);if(e&&e.code==='permission-denied')toast('Firestore ปฏิเสธการเข้าถึง ตรวจสอบ Security Rules')}
-async function push(col,arr){
-  if(!FB.ok||!FB.ready[col])return;
-  const L=last[col]||{},cur={},ops=[];
-  arr.forEach(x=>{if(!x||!x.id)return;const j=JSON.stringify(x);cur[x.id]=j;if(L[x.id]!==j)ops.push([x.id,JSON.parse(j)])});
-  Object.keys(L).forEach(id=>{if(!(id in cur))ops.push([id,null])});
-  last[col]=cur;
-  try{for(let i=0;i<ops.length;i+=400){const b=FB.db.batch();ops.slice(i,i+400).forEach(([id,d])=>{const r=FB.db.collection(col).doc(id);d?b.set(r,d):b.delete(r)});await b.commit()}}
-  catch(e){last[col]=L;fail(e)}
-}
-function pushShop(v){
-  if(!FB.ok||!FB.ready.shop)return;
-  FB.db.collection('settings').doc('shop').set({name:v.name||'',foot:v.foot||'',paper:Number(v.paper)||58,low:Number(v.low)||0,otypes:(v.otypes||[]).map(x=>({id:x.id,name:x.name})),logo:v.logo||'',info:v.info||'',qr:v.qr||'',pad:v.pad==null||isNaN(v.pad)?2:Number(v.pad)}).catch(fail);
-}
-function refreshUI(){
-  const a=document.activeElement;
-  if(mr||(a&&a.matches&&a.matches('#app input,#app textarea')))return renderAlert();
-  render();
-}
-function listen(col){
-  const C=COLS[col];let first=true;
-  FB.db.collection(col).onSnapshot({includeMetadataChanges:true},snap=>{
-    const cached=snap.metadata.fromCache;
-    if(!cached){FB.live=true;setSync('ok')}else setSync(FB.live?'offline':'connecting');
-    if(first){
-      if(cached&&snap.empty)return;
-      first=false;
-      if(snap.empty){FB.ready[col]=true;push(col,C.get());return}
-    }else if(snap.metadata.hasPendingWrites||!snap.docChanges().length)return;
-    C.put(snap.docs.map(d=>d.data()));rawSet(C.key,C.get());
-    last[col]=Object.fromEntries(C.get().filter(x=>x&&x.id).map(x=>[x.id,JSON.stringify(x)]));
-    FB.ready[col]=true;refreshUI();
-  },fail);
-}
-async function startSync(){
-  setSync('connecting');
-  try{
-    for(const [b,x] of SDK){try{await loadJS(b+'firebase-app-compat'+x);await loadJS(b+'firebase-firestore-compat'+x);if(window.firebase&&firebase.firestore)break}catch(e){}}
-    if(!(window.firebase&&firebase.firestore))throw new Error('SDK not loaded');
-    firebase.apps.length?firebase.app():firebase.initializeApp(firebaseConfig);
-    FB.db=firebase.firestore();
-    try{await FB.db.enablePersistence({synchronizeTabs:true})}catch(e){}
-    FB.ok=true;
-    Object.keys(COLS).forEach(listen);
-    FB.db.collection('settings').doc('shop').onSnapshot(sn=>{
-      if(!sn.metadata.fromCache&&!sn.exists){FB.ready.shop=true;pushShop(shop);return}
-      if(sn.exists&&!sn.metadata.hasPendingWrites){shop={...shop,...sn.data()};rawSet('pos.shop',shop);FB.ready.shop=true;refreshShift();renderAlert()}
-    },fail);
-    setTimeout(()=>{if(!FB.live)setSync('offline')},8000);
-    addEventListener('offline',()=>setSync('offline'));
-    addEventListener('online',()=>setSync(FB.live?'ok':'connecting'));
-  }catch(e){FB.ok=false;setSync('local');console.warn('Firebase disabled, using LocalStorage only:',e)}
-}
-if(!sess0)showLogin();
-render();
-startSync();
-</script>
-</body>
-</html>
+window.restoreModifiers=()=>A.seedgroups(
